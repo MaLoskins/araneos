@@ -24,23 +24,19 @@ const TrainingTab = () => {
   const graphActions = useGraphActions();
 
   const graphStats = useMemo(() => {
-    const nodes = graphContext.nodes || [];
-    const edges = graphContext.edges || [];
-    const labelNodes = nodes.filter(n => (n.label != null && n.label !== '') || (n.features?.label != null && n.features?.label !== ''));
-    return {
-      nodes: nodes.length,
-      edges: edges.length,
-      hasLabels: labelNodes.length > 0,
-      uniqueLabels: [...new Set(labelNodes.map(n => n.label ?? n.features?.label))],
-    };
-  }, [graphContext.nodes, graphContext.edges]);
+    if (graphContext.stats) {
+      return {
+        nodes: graphContext.stats.node_count,
+        edges: graphContext.stats.edge_count,
+        hasLabels: graphContext.stats.labeled_nodes > 0,
+        uniqueLabels: graphContext.stats.unique_labels || [],
+      };
+    }
+    return { nodes: 0, edges: 0, hasLabels: false, uniqueLabels: [] };
+  }, [graphContext.stats]);
 
-  const trainingData = useMemo(() => {
-    if (!graphContext.nodes?.length || !graphContext.edges?.length) return null;
-    return { nodes: graphContext.nodes, links: graphContext.edges };
-  }, [graphContext.nodes, graphContext.edges]);
-
-  const isValidForTraining = graphStats.nodes > 0 && graphStats.edges > 0 && graphStats.hasLabels;
+  const sessionId = graphContext.sessionId;
+  const isValidForTraining = sessionId && graphStats.nodes > 0 && graphStats.edges > 0 && graphStats.hasLabels;
 
   const [modelConfig, setModelConfig] = useState({
     model_name: 'GCN', hidden_channels: 64, learning_rate: 0.01,
@@ -69,11 +65,11 @@ const TrainingTab = () => {
   }, [trainingLogs]);
 
   const workflowStep = useMemo(() => {
-    if (!trainingData) return 0;
+    if (!sessionId) return 0;
     if (!isTraining && !metrics) return 1;
     if (isTraining) return 2;
     return 3;
-  }, [trainingData, isTraining, metrics]);
+  }, [sessionId, isTraining, metrics]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -90,7 +86,7 @@ const TrainingTab = () => {
   };
 
   const handleStartTraining = () => {
-    if (!trainingData) return;
+    if (!sessionId) return;
     graphActions.clearTrainingLogs();
     setMetrics(null);
     setTrainingError(null);
@@ -130,7 +126,7 @@ const TrainingTab = () => {
     };
 
     try {
-      trainingRequestRef.current = trainModel(trainingData, configToSend, handleMessage, (error) => {
+      trainingRequestRef.current = trainModel(sessionId, configToSend, handleMessage, (error) => {
         setTrainingError(error?.message || 'Training error');
         setIsTraining(false);
       });

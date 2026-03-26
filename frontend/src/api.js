@@ -7,9 +7,14 @@ export const processData = async (data, config) => {
   return response.data;
 };
 
-export const trainModel = (graph, modelConfig, onMessage, onError) => {
-  if (!graph?.nodes || !graph?.links) {
-    const err = new Error('Invalid graph data: Must contain nodes and links');
+export const fetchGraphStats = async (sessionId) => {
+  const response = await axios.get(`${API_BASE_URL}/graph/${sessionId}/stats`);
+  return response.data;
+};
+
+export const trainModel = (sessionId, modelConfig, onMessage, onError) => {
+  if (!sessionId) {
+    const err = new Error('No session ID. Please process a graph first.');
     onError(err);
     return Promise.reject(err);
   }
@@ -25,10 +30,9 @@ export const trainModel = (graph, modelConfig, onMessage, onError) => {
   return axios({
     url: `${API_BASE_URL}/train-gnn`,
     method: 'POST',
-    data: { graph, configuration: modelConfig },
+    data: { session_id: sessionId, configuration: modelConfig },
     responseType: 'text',
     onDownloadProgress: (progressEvent) => {
-      // In browser, the raw response text is on the XMLHttpRequest target
       const rawText = progressEvent.event?.target?.responseText
         || progressEvent.currentTarget?.responseText
         || progressEvent.currentTarget?.response
@@ -40,11 +44,7 @@ export const trainModel = (graph, modelConfig, onMessage, onError) => {
       lastProcessedIndex = messages.length;
 
       newMessages.forEach(msg => {
-        try {
-          onMessage(JSON.parse(msg));
-        } catch {
-          // Skip incomplete JSON chunks
-        }
+        try { onMessage(JSON.parse(msg)); } catch {}
       });
     },
   }).catch(error => {

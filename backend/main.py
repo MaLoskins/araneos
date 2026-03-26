@@ -8,6 +8,7 @@ import numpy as np
 import json
 import torch
 import logging
+import uuid
 from networkx.readwrite import json_graph
 
 from DataFrameToGraph import DataFrameToGraph
@@ -29,6 +30,49 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- Server-Side Session Store ---
+# Stores full graph data keyed by session ID. Keeps heavy data (embeddings)
+# on the backend so the frontend only needs lightweight summaries.
+
+_sessions: Dict[str, Dict] = {}
+
+def _store_session(graph_data: dict) -> str:
+    """Store graph data server-side, return session ID."""
+    session_id = str(uuid.uuid4())[:8]
+    _sessions[session_id] = graph_data
+    # Keep max 10 sessions to avoid unbounded memory
+    if len(_sessions) > 10:
+        oldest = next(iter(_sessions))
+        del _sessions[oldest]
+    logger.info(f"Stored session {session_id} ({len(graph_data.get('nodes', []))} nodes)")
+    return session_id
+
+def _get_session(session_id: str) -> dict:
+    """Retrieve graph data by session ID."""
+    if session_id not in _sessions:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found. Please reprocess your graph.")
+    return _sessions[session_id]
+
+def _make_viz_node(node: dict) -> dict:
+    """Strip embeddings from a node for visualization (keep labels, types, skip float arrays)."""
+    viz = {"id": node["id"]}
+    if "type" in node:
+        viz["type"] = node["type"]
+    feats = node.get("features", {})
+    # Only include non-embedding features for viz
+    viz_feats = {}
+    for k, v in feats.items():
+        if isinstance(v, (list, np.ndarray)):
+            continue  # Skip embedding vectors
+        viz_feats[k] = v
+    if viz_feats:
+        viz["features"] = viz_feats
+    # Promote label to top level for easy access
+    if "label" in feats:
+        viz["label"] = feats["label"]
+    return viz
+
+
 # --- Request Models ---
 
 class ProcessDataRequest(BaseModel):
@@ -43,16 +87,16 @@ class ModelConfig(BaseModel):
     dropout: float
     extra_params: Optional[Dict[str, Any]] = None
 
-class TrainGNNRequest(BaseModel):
-    graph: Dict[str, List]
+class TrainRequest(BaseModel):
+    session_id: str
     configuration: ModelConfig
+
 
 # --- Model Factory ---
 
 def _create_model(name: str, in_ch: int, hidden_ch: int, num_cls: int, dropout: float, extra: dict):
-    """Factory function to create GNN models by name."""
     key = name.upper()
-    if key in ('GCN',):
+    if key == 'GCN':
         return GCNModel(in_ch, hidden_ch, num_cls, dropout)
     if key in ('GRAPHSAGE', 'SAGE'):
         return GraphSageModel(in_ch, hidden_ch, num_cls, dropout)
@@ -69,10 +113,12 @@ def _create_model(name: str, in_ch: int, hidden_ch: int, num_cls: int, dropout: 
 
 SUPPORTED_MODELS = {'GCN', 'GRAPHSAGE', 'SAGE', 'GAT', 'GIN', 'CHEBCONV', 'CHEB', 'RESIDUALGCN', 'RESGCN'}
 
+
 # --- Endpoints ---
 
 @app.post("/process-data")
 def process_data(req: ProcessDataRequest):
+    """Process CSV data into a graph. Stores full graph server-side, returns lightweight summary."""
     df = pd.DataFrame(req.data)
     config = req.config
 
@@ -102,7 +148,6 @@ def process_data(req: ProcessDataRequest):
                     break
 
     # Generate embeddings
-    feature_data = None
     if use_feature_space and feature_space_config:
         logger.info("Generating embeddings with FeatureSpaceCreator.")
         feature_data = FeatureSpaceCreator(config=feature_space_config, device="cuda").process(df)
@@ -113,7 +158,6 @@ def process_data(req: ProcessDataRequest):
             feat_type = feat.get("type", "text").lower()
 
             if not node_id_col or not col_name:
-                logger.warning(f"Skipping feature {feat} - missing required fields.")
                 continue
 
             feature_col = f"{col_name}_{'embedding' if feat_type == 'text' else 'feature'}"
@@ -123,7 +167,6 @@ def process_data(req: ProcessDataRequest):
 
             if node_id_col not in feature_data.columns:
                 if node_id_col not in df.columns:
-                    logger.error(f"Column '{node_id_col}' not in CSV. Cannot attach features.")
                     continue
                 feature_data[node_id_col] = df[node_id_col]
 
@@ -132,7 +175,6 @@ def process_data(req: ProcessDataRequest):
                     continue
                 node_id_str = str(row[node_id_col])
                 val = row[feature_col].tolist() if isinstance(row[feature_col], np.ndarray) else row[feature_col]
-
                 for n in graph_data["nodes"]:
                     if str(n["id"]) == node_id_str:
                         n.setdefault("features", {})
@@ -140,27 +182,98 @@ def process_data(req: ProcessDataRequest):
                         break
 
         logger.info("Feature embeddings attached to graph nodes.")
-    else:
-        logger.info("No advanced embeddings requested.")
 
-    # NetworkX 3.x uses 'edges' key; older versions used 'links'
+    # Normalize edge key
     edge_key = 'edges' if 'edges' in graph_data else 'links'
-    edge_list = graph_data.get(edge_key, [])
-    logger.info(f"Returning graph with {len(graph_data.get('nodes', []))} nodes, {len(edge_list)} edges (key='{edge_key}')")
-    if edge_list:
-        logger.info(f"Sample edge: {edge_list[0]}")
+    edges = graph_data.get(edge_key, [])
+
+    # Store full graph server-side
+    full_graph = {"nodes": graph_data["nodes"], "links": edges, "directed": graph_data.get("directed", False)}
+    session_id = _store_session(full_graph)
+
+    # Build lightweight response for frontend (no embedding vectors)
+    viz_nodes = [_make_viz_node(n) for n in graph_data["nodes"]]
+    viz_edges = [{"source": e.get("source"), "target": e.get("target"), "type": e.get("type", "")} for e in edges]
+
+    # Compute stats
+    labels = [n.get("features", {}).get("label") for n in graph_data["nodes"]]
+    label_set = [l for l in labels if l is not None]
+    has_embeddings = any(
+        isinstance(v, (list, np.ndarray))
+        for n in graph_data["nodes"]
+        for v in n.get("features", {}).values()
+    )
+
+    logger.info(f"Session {session_id}: {len(viz_nodes)} nodes, {len(viz_edges)} edges, {len(set(label_set))} classes")
 
     return {
-        "graph": graph_data,
-        "featureDataCsv": feature_data.to_csv(index=False) if feature_data is not None else None,
+        "session_id": session_id,
+        "graph": {"nodes": viz_nodes, "edges": viz_edges, "directed": graph_data.get("directed", False)},
+        "stats": {
+            "node_count": len(viz_nodes),
+            "edge_count": len(viz_edges),
+            "label_count": len(set(label_set)),
+            "labeled_nodes": len(label_set),
+            "has_embeddings": has_embeddings,
+            "unique_labels": list(set(label_set)),
+        },
+    }
+
+
+@app.get("/graph/{session_id}")
+def get_graph(session_id: str):
+    """Get lightweight visualization data for a session."""
+    full_graph = _get_session(session_id)
+    viz_nodes = [_make_viz_node(n) for n in full_graph["nodes"]]
+    viz_edges = [{"source": e.get("source"), "target": e.get("target"), "type": e.get("type", "")} for e in full_graph["links"]]
+    return {"nodes": viz_nodes, "edges": viz_edges, "directed": full_graph.get("directed", False)}
+
+
+@app.get("/graph/{session_id}/stats")
+def get_graph_stats(session_id: str):
+    """Get graph statistics without transferring full data."""
+    full_graph = _get_session(session_id)
+    nodes = full_graph["nodes"]
+    edges = full_graph["links"]
+
+    labels = [n.get("features", {}).get("label") for n in nodes]
+    label_set = [l for l in labels if l is not None]
+
+    # Degree distribution
+    degrees = {}
+    for n in nodes:
+        degrees[str(n["id"])] = 0
+    for e in edges:
+        src = str(e["source"]) if not isinstance(e["source"], dict) else str(e["source"]["id"])
+        tgt = str(e["target"]) if not isinstance(e["target"], dict) else str(e["target"]["id"])
+        degrees[src] = degrees.get(src, 0) + 1
+        degrees[tgt] = degrees.get(tgt, 0) + 1
+
+    deg_values = list(degrees.values())
+    freq = {}
+    for d in deg_values:
+        freq[d] = freq.get(d, 0) + 1
+
+    return {
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+        "label_count": len(set(label_set)),
+        "labeled_nodes": len(label_set),
+        "unique_labels": list(set(label_set)),
+        "avg_degree": round(sum(deg_values) / max(len(deg_values), 1), 2),
+        "max_degree": max(deg_values) if deg_values else 0,
+        "degree_distribution": {str(k): v for k, v in sorted(freq.items())},
+        "has_embeddings": any(isinstance(v, (list, np.ndarray)) for n in nodes for v in n.get("features", {}).values()),
     }
 
 
 @app.post("/train-gnn")
-async def train_gnn(request: TrainGNNRequest) -> StreamingResponse:
-    """Train a GNN model and stream back metrics."""
+async def train_gnn(request: TrainRequest) -> StreamingResponse:
+    """Train a GNN model using server-stored graph data. Only the session ID is needed."""
     try:
-        graph_builder = TorchGeometricGraphBuilder(request.graph)
+        full_graph = _get_session(request.session_id)
+
+        graph_builder = TorchGeometricGraphBuilder(full_graph)
         data = graph_builder.build_data()
 
         if data.y is None:
@@ -169,30 +282,21 @@ async def train_gnn(request: TrainGNNRequest) -> StreamingResponse:
         unique_labels = torch.unique(data.y)
         num_classes = len(unique_labels) - (1 if -1 in unique_labels else 0)
 
-        # Diagnostic logging
-        logger.info(f"[TRAIN] Nodes: {data.num_nodes}, Edges: {data.edge_index.shape[1]}, Features per node: {data.num_node_features}")
-        logger.info(f"[TRAIN] Labels: {unique_labels.tolist()}, Num classes: {num_classes}")
-        label_counts = {l.item(): (data.y == l).sum().item() for l in unique_labels}
-        logger.info(f"[TRAIN] Label distribution: {label_counts}")
-        logger.info(f"[TRAIN] Feature sample (node 0, first 10): {data.x[0][:10].tolist()}")
-        logger.info(f"[TRAIN] Feature std: {data.x.std().item():.6f}, mean: {data.x.mean().item():.6f}")
+        logger.info(f"[TRAIN] Session: {request.session_id}, Nodes: {data.num_nodes}, Edges: {data.edge_index.shape[1]}, Features: {data.num_node_features}, Classes: {num_classes}")
 
         if num_classes < 2:
             raise HTTPException(status_code=400, detail=f"Need at least 2 classes, found {num_classes}.")
 
         data = split_data(data, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1)
-
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         data = data.to(device)
 
         config = request.configuration
-        in_channels = data.num_node_features
         extra_params = config.extra_params or {}
 
-        # Create model
-        model = _create_model(config.model_name, in_channels, config.hidden_channels, num_classes, config.dropout, extra_params)
+        model = _create_model(config.model_name, data.num_node_features, config.hidden_channels, num_classes, config.dropout, extra_params)
         if model is None:
-            raise HTTPException(status_code=400, detail=f"Unsupported model: {config.model_name}. Available: {', '.join(sorted(SUPPORTED_MODELS))}")
+            raise HTTPException(status_code=400, detail=f"Unsupported model: {config.model_name}")
         model = model.to(device)
 
         optimizer = torch.optim.Adam(model.parameters(), lr=config.lr, weight_decay=5e-4)
@@ -202,7 +306,7 @@ async def train_gnn(request: TrainGNNRequest) -> StreamingResponse:
         async def training_stream() -> AsyncGenerator[str, None]:
             yield json.dumps({
                 "status": "started",
-                "message": f"Training {config.model_name} model",
+                "message": f"Training {config.model_name}",
                 "epoch": 0,
                 "total_epochs": config.epochs,
             }) + "\n"
@@ -210,7 +314,6 @@ async def train_gnn(request: TrainGNNRequest) -> StreamingResponse:
             best_val_loss = float('inf')
 
             for epoch in range(1, config.epochs + 1):
-                # Train
                 model.train()
                 optimizer.zero_grad()
                 out = model(data.x, data.edge_index)
@@ -220,7 +323,6 @@ async def train_gnn(request: TrainGNNRequest) -> StreamingResponse:
                 optimizer.step()
                 train_loss = loss.item()
 
-                # Validate
                 model.eval()
                 with torch.no_grad():
                     out = model(data.x, data.edge_index)
@@ -242,7 +344,6 @@ async def train_gnn(request: TrainGNNRequest) -> StreamingResponse:
                     "is_best_model": is_best,
                 }) + "\n"
 
-            # Test
             model.eval()
             with torch.no_grad():
                 out = model(data.x, data.edge_index)

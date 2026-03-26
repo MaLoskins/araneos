@@ -9,7 +9,6 @@ const useGraph = () => {
   const graphActions = useGraphActions();
   const builder = useGraphBuilder();
 
-  // Modal state (ephemeral, ok to lose on unmount)
   const [nodeEditModalIsOpen, setNodeEditModalIsOpen] = useState(false);
   const [currentNode, setCurrentNode] = useState(null);
   const [relationshipModalIsOpen, setRelationshipModalIsOpen] = useState(false);
@@ -89,8 +88,13 @@ const useGraph = () => {
         label_column: labelColumn || '',
       };
       const response = await processData(builder.csvData, extendedConfig);
-      if (response.graph) {
-        graphActions.setGraph(response.graph);
+      if (response.session_id && response.graph) {
+        // Store session ID + lightweight viz data in context
+        graphActions.setGraph({
+          sessionId: response.session_id,
+          graph: response.graph,
+          stats: response.stats,
+        });
         return true;
       }
       builder.setGraphError('No valid graph data returned');
@@ -104,18 +108,19 @@ const useGraph = () => {
   }, [builder, graphActions]);
 
   const graphStats = useMemo(() => {
-    const nodesArr = Array.isArray(graphData.nodes) ? graphData.nodes : [];
-    const edgesArr = Array.isArray(graphData.edges) ? graphData.edges : [];
-    const labelNodes = nodesArr.filter(n => n?.features?.label != null || n?.label != null);
-    return {
-      nodeCount: nodesArr.length,
-      edgeCount: edgesArr.length,
-      hasLabels: labelNodes.length > 0,
-      uniqueLabels: [...new Set(labelNodes.map(n => n.label ?? n.features?.label))],
-    };
-  }, [graphData.nodes, graphData.edges]);
+    // Use server-provided stats if available
+    if (graphData.stats) {
+      return {
+        nodeCount: graphData.stats.node_count,
+        edgeCount: graphData.stats.edge_count,
+        hasLabels: graphData.stats.labeled_nodes > 0,
+        uniqueLabels: graphData.stats.unique_labels || [],
+      };
+    }
+    return { nodeCount: 0, edgeCount: 0, hasLabels: false, uniqueLabels: [] };
+  }, [graphData.stats]);
 
-  const isValidForTraining = graphStats.nodeCount > 0 && graphStats.edgeCount > 0 && graphStats.hasLabels;
+  const isValidForTraining = graphData.sessionId && graphStats.nodeCount > 0 && graphStats.edgeCount > 0 && graphStats.hasLabels;
 
   return {
     csvData: builder.csvData,

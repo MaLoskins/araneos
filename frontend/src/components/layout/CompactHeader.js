@@ -6,8 +6,8 @@ import logo from '../../assets/logo.svg';
 
 function CompactHeader() {
   const graphData = useGraphData();
-  const nodeCount = graphData.nodes?.length || 0;
-  const edgeCount = graphData.edges?.length || 0;
+  const nodeCount = graphData.stats?.node_count || 0;
+  const edgeCount = graphData.stats?.edge_count || 0;
 
   const handleDownloadJSON = () => {
     if (!nodeCount) return;
