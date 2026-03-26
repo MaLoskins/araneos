@@ -1,136 +1,130 @@
-// src/components/GraphNet-Tab/GraphNet.js
-import React, { useState, memo, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import FileUploader from './FileUploader';
 import ConfigurationPanel from './ConfigurationPanel';
 import ReactFlowWrapper from './ReactFlowWrapper';
 import GraphVisualizer from './GraphVisualizer';
+import GraphStatsPanel from './GraphStatsPanel';
 import NodeEditModal from './NodeEditModal';
 import RelationshipModal from './RelationshipModal';
-import InfoButton from '../InfoButton';
-import sectionsInfo from '../../sectionsInfo';
+import WorkflowStepper from '../layout/WorkflowStepper';
+import useGraph from '../../hooks/useGraph';
+import { useGraphData } from '../../context/GraphDataContext';
 
-// Memoize components for better performance
-const MemoizedFileUploader = memo(FileUploader);
-const MemoizedConfigurationPanel = memo(ConfigurationPanel);
-const MemoizedReactFlowWrapper = memo(ReactFlowWrapper);
-const MemoizedGraphVisualizer = memo(GraphVisualizer);
-const MemoizedInfoButton = memo(InfoButton);
-function GraphNet(props) {
-  const {
-    columns,
-    graphData,
-    loading,
-    nodes,
-    edges,
-    nodeEditModalIsOpen,
-    currentNode,
-    relationshipModalIsOpen,
-    currentEdge,
-    handleFileDrop,
-    handleSelectNode,
-    handleSubmit,
-    onNodesChange,
-    onEdgesChange,
-    onConnectHandler,
-    onNodeClickHandler,
-    onSaveRelationship,
-    setNodeEditModalIsOpen,
-    setRelationshipModalIsOpen,
-    handleSaveNodeEdit,
-    useFeatureSpace,
-    toggleFeatureSpace,
-    featureConfigs,
-    setFeatureConfigs,
-  } = props;
+const STEPS = ['Upload', 'Nodes', 'Relationships', 'Features', 'Process'];
 
-  const [showReactFlow, setShowReactFlow] = useState(true);
-  
-  // Memoize handlers to prevent unnecessary re-renders
-  const toggleReactFlow = useCallback(() => setShowReactFlow(true), []);
-  
-  const handleSubmitWithToggle = useCallback(async (labelCol) => {
-    await handleSubmit(labelCol);
-    setShowReactFlow(false);
-  }, [handleSubmit]);
-  
-  const closeNodeEditModal = useCallback(() => setNodeEditModalIsOpen(false), [setNodeEditModalIsOpen]);
-  const closeRelationshipModal = useCallback(() => setRelationshipModalIsOpen(false), [setRelationshipModalIsOpen]);
+function GraphNet() {
+  const graph = useGraph();
+  const graphData = useGraphData();
+  const hasGraphData = graphData.nodes?.length > 0;
+  const [rightTab, setRightTab] = useState(0);
 
-  // Memoize configuration panel props
-  const configPanelProps = useMemo(() => ({
-    columns,
-    onSelectNode: handleSelectNode,
-    onSubmit: handleSubmitWithToggle,
-    loading,
-    selectedNodes: props.config?.nodes?.map(n => n.id) || [],
-    useFeatureSpace,
-    onToggleFeatureSpace: toggleFeatureSpace,
-    featureConfigs,
-    setFeatureConfigs
-  }), [columns, handleSelectNode, handleSubmitWithToggle, loading, props.config,
-       useFeatureSpace, toggleFeatureSpace, featureConfigs, setFeatureConfigs]);
-  
-  // Memoize react flow props
-  const reactFlowProps = useMemo(() => ({
-    nodes,
-    edges,
-    onNodesChange,
-    onEdgesChange,
-    onConnect: onConnectHandler,
-    onNodeClick: onNodeClickHandler
-  }), [nodes, edges, onNodesChange, onEdgesChange, onConnectHandler, onNodeClickHandler]);
+  const handleSubmitWithView = useCallback(async (labelCol) => {
+    const result = await graph.handleSubmit(labelCol);
+    if (result) setRightTab(1);
+  }, [graph]);
+
+  const currentStep = useMemo(() => {
+    if (graph.columns.length === 0) return 0;
+    if (graph.config.nodes.length === 0) return 1;
+    if (graph.edges.length === 0) return 2;
+    if (graph.loading) return 4;
+    if (hasGraphData) return 5;
+    return 3;
+  }, [graph.columns, graph.config.nodes, graph.edges, graph.loading, hasGraphData]);
+
+  const selectedNodes = graph.config?.nodes?.map(n => n.id) || [];
 
   return (
-    <div className="main-content">
-      <h2>Linked Graph Network</h2>
-      <MemoizedFileUploader onFileDrop={handleFileDrop} />
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <WorkflowStepper steps={STEPS} currentStep={currentStep} />
 
-      {columns.length > 0 && (
-        <MemoizedConfigurationPanel {...configPanelProps} />
-      )}
+      <PanelGroup direction="horizontal" style={{ flex: 1 }}>
+        <Panel defaultSize={30} minSize={20} maxSize={45}>
+          <div className="panel">
+            <div className="panel-header"><h3>Configuration</h3></div>
+            <div className="panel-body">
+              <FileUploader onFileDrop={graph.handleFileDrop} hasFile={graph.columns.length > 0} />
+              {graph.columns.length > 0 && (
+                <ConfigurationPanel
+                  columns={graph.columns}
+                  onSelectNode={graph.handleSelectNode}
+                  onSubmit={handleSubmitWithView}
+                  loading={graph.loading}
+                  selectedNodes={selectedNodes}
+                  useFeatureSpace={graph.useFeatureSpace}
+                  onToggleFeatureSpace={graph.toggleFeatureSpace}
+                  featureConfigs={graph.featureConfigs}
+                  setFeatureConfigs={graph.setFeatureConfigs}
+                />
+              )}
+            </div>
+            {graph.columns.length > 0 && (
+              <div className="panel-footer">
+                <button
+                  className="btn btn-primary btn-block"
+                  onClick={() => handleSubmitWithView(localStorage.getItem('selectedLabelColumn') || '')}
+                  disabled={graph.loading || selectedNodes.length === 0}
+                >
+                  {graph.loading ? 'Processing...' : 'Process Graph'}
+                </button>
+                {graph.graphError && <div className="training-error" style={{ marginTop: 8 }}>{graph.graphError}</div>}
+              </div>
+            )}
+          </div>
+        </Panel>
 
-      {columns.length > 0 && !showReactFlow && (
-        <button
-          className="button reopen-flow-btn"
-          onClick={() => setShowReactFlow(true)}
-        >
-          Reopen React Flow Configuration
-        </button>
-      )}
+        <PanelResizeHandle />
 
-      {columns.length > 0 && showReactFlow && (
-        <>
-          <h3 className="accent-text-center react-flow-title">
-            React Flow Configuration
-            <MemoizedInfoButton
-              title={sectionsInfo.graphFlow.title}
-              description={sectionsInfo.graphFlow.description}
-            />
-          </h3>
-          <MemoizedReactFlowWrapper {...reactFlowProps} />
-        </>
-      )}
+        <Panel defaultSize={70} minSize={40}>
+          <div className="panel">
+            <div className="tab-bar">
+              {['Schema', 'Graph', 'Statistics'].map((label, i) => (
+                <button key={label} className={`tab-btn ${rightTab === i ? 'active' : ''}`} onClick={() => setRightTab(i)}>{label}</button>
+              ))}
+            </div>
 
-      {graphData && <MemoizedGraphVisualizer graphData={graphData} />}
+            {/* Keep all tabs mounted, hide with display:none to avoid remounting */}
+            <div style={{ flex: 1, overflow: 'hidden', display: rightTab === 0 ? 'flex' : 'none', flexDirection: 'column' }}>
+              <ReactFlowWrapper
+                nodes={graph.nodes}
+                edges={graph.edges}
+                setNodes={graph.setNodes}
+                setEdges={graph.setEdges}
+                onConnect={graph.onConnectHandler}
+                onNodeClick={graph.onNodeClickHandler}
+              />
+            </div>
+            <div style={{ flex: 1, overflow: 'hidden', display: rightTab === 1 ? 'flex' : 'none', flexDirection: 'column' }}>
+              {hasGraphData
+                ? <GraphVisualizer graphData={graphData} />
+                : <div className="stats-panel-empty"><p>Process a graph to see the visualization.</p></div>
+              }
+            </div>
+            <div style={{ flex: 1, overflow: 'hidden', display: rightTab === 2 ? 'flex' : 'none', flexDirection: 'column' }}>
+              <GraphStatsPanel />
+            </div>
+          </div>
+        </Panel>
+      </PanelGroup>
 
-      {currentNode && (
+      {graph.currentNode && (
         <NodeEditModal
-          isOpen={nodeEditModalIsOpen}
-          onRequestClose={closeNodeEditModal}
-          node={currentNode}
-          onSaveNodeEdit={handleSaveNodeEdit}
+          isOpen={graph.nodeEditModalIsOpen}
+          onRequestClose={() => graph.setNodeEditModalIsOpen(false)}
+          node={graph.currentNode}
+          onSaveNodeEdit={graph.handleSaveNodeEdit}
         />
       )}
-
-      {currentEdge && relationshipModalIsOpen && (
+      {graph.currentEdge && graph.relationshipModalIsOpen && (
         <RelationshipModal
-          isOpen={relationshipModalIsOpen}
-          onRequestClose={closeRelationshipModal}
-          onSaveRelationship={onSaveRelationship}
+          isOpen={graph.relationshipModalIsOpen}
+          onRequestClose={() => graph.setRelationshipModalIsOpen(false)}
+          onSaveRelationship={graph.onSaveRelationship}
         />
       )}
     </div>
   );
 }
-// Export memoized component for better performance
-export default memo(GraphNet);
+
+export default GraphNet;

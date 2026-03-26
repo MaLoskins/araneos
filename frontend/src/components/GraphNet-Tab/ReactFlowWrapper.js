@@ -1,16 +1,19 @@
-import React from 'react';
-import ReactFlow, { Background, Controls } from 'react-flow-renderer';
+import React, { useCallback } from 'react';
+import ReactFlow, { Background, Controls, applyNodeChanges, applyEdgeChanges } from 'react-flow-renderer';
 
-const ReactFlowWrapper = ({
-  nodes,
-  edges,
-  onNodesChange,
-  onEdgesChange,
-  onConnect,
-  onNodeClick,
-}) => {
+const ReactFlowWrapper = ({ nodes, edges, setNodes, setEdges, onConnect, onNodeClick }) => {
+  const onNodesChange = useCallback(
+    (changes) => setNodes((nds) => applyNodeChanges(changes, nds)),
+    [setNodes]
+  );
+
+  const onEdgesChange = useCallback(
+    (changes) => setEdges((eds) => applyEdgeChanges(changes, eds)),
+    [setEdges]
+  );
+
   return (
-    <div className="flow-wrapper" style={{ width: '80%', height: '400px', margin: '0 auto' }}>
+    <div className="flow-wrapper">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -21,7 +24,7 @@ const ReactFlowWrapper = ({
         fitView
         style={{ width: '100%', height: '100%' }}
       >
-        <Background color="#aaa" gap={16} />
+        <Background color="#333" gap={20} />
         <Controls />
       </ReactFlow>
     </div>

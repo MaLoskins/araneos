@@ -1,302 +1,144 @@
-import React, { useEffect, useRef } from 'react';
-import { 
-  Chart as ChartJS, 
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler,
-  ArcElement
+import React from 'react';
+import {
+  Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement,
+  BarElement, Title, Tooltip, Legend, Filler, ArcElement,
 } from 'chart.js';
-import { Line, Bar, Pie } from 'react-chartjs-2';
-import './TrainingTab.css';
+import { Line, Pie } from 'react-chartjs-2';
 
-// Register Chart.js components
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler,
-  ArcElement
-);
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler, ArcElement);
 
-/**
- * MetricsVisualizer component for displaying training metrics visualizations
- * Shows loss curves, accuracy trends, and other relevant performance metrics
- * 
- * @param {Object} props - Component props
- * @param {Object} props.metrics - Training metrics data from model training
- */
-const MetricsVisualizer = ({ metrics }) => {
-  // Charts container reference for responsive sizing
-  const chartsContainerRef = useRef(null);
+const MetricsVisualizer = ({ metrics, view = 'metrics' }) => {
+  if (!metrics) return null;
 
-  // Guard against invalid metrics data
-  if (!metrics) {
-    return null;
-  }
+  if (view === 'metrics') return <MetricsCards metrics={metrics} />;
+  if (view === 'charts') return <MetricsCharts metrics={metrics} />;
+  if (view === 'report') return <MetricsReport metrics={metrics} />;
+  return null;
+};
 
-  /**
-   * Prepares data for the loss curve chart
-   * @returns {Object} Chart.js data object for loss visualization
-   */
-  const getLossChartData = () => {
-    // Safely access training history or return empty arrays if not available
-    const history = metrics.history || {};
-    const epochs = Array.from({ length: history.loss?.length || 0 }, (_, i) => i + 1);
-    
-    return {
-      labels: epochs,
-      datasets: [
-        {
-          label: 'Training Loss',
-          data: history.loss || [],
-          borderColor: 'rgb(255, 99, 132)',
-          backgroundColor: 'rgba(255, 99, 132, 0.1)',
-          fill: true,
-          tension: 0.4,
-        },
-        {
-          label: 'Validation Loss',
-          data: history.val_loss || [],
-          borderColor: 'rgb(54, 162, 235)',
-          backgroundColor: 'rgba(54, 162, 235, 0.1)',
-          fill: true,
-          tension: 0.4,
-        }
-      ]
-    };
-  };
-
-  /**
-   * Prepares data for the accuracy curve chart
-   * @returns {Object} Chart.js data object for accuracy visualization
-   */
-  const getAccuracyChartData = () => {
-    // Safely access training history or return empty arrays if not available
-    const history = metrics.history || {};
-    const epochs = Array.from({ length: history.accuracy?.length || 0 }, (_, i) => i + 1);
-    
-    return {
-      labels: epochs,
-      datasets: [
-        {
-          label: 'Training Accuracy',
-          data: history.accuracy || [],
-          borderColor: 'rgb(75, 192, 192)',
-          backgroundColor: 'rgba(75, 192, 192, 0.1)',
-          fill: true,
-          tension: 0.4,
-        },
-        {
-          label: 'Validation Accuracy',
-          data: history.val_accuracy || [],
-          borderColor: 'rgb(153, 102, 255)',
-          backgroundColor: 'rgba(153, 102, 255, 0.1)',
-          fill: true,
-          tension: 0.4,
-        }
-      ]
-    };
-  };
-
-  /**
-   * Prepares data for class distribution chart
-   * @returns {Object} Chart.js data object for class distribution visualization
-   */
-  const getClassDistributionData = () => {
-    // If no class distribution data is available, return null
-    if (!metrics.class_distribution) {
-      return null;
-    }
-    
-    const classNames = Object.keys(metrics.class_distribution);
-    const counts = Object.values(metrics.class_distribution);
-    
-    // Generate colors for each class
-    const backgroundColors = classNames.map((_, index) => {
-      const hue = (index * 137) % 360; // Use golden ratio for color spacing
-      return `hsla(${hue}, 70%, 60%, 0.7)`;
-    });
-    
-    return {
-      labels: classNames,
-      datasets: [
-        {
-          data: counts,
-          backgroundColor: backgroundColors,
-          borderWidth: 1,
-        }
-      ]
-    };
-  };
-
-  // Chart options
-  const lineChartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        position: 'top',
-      },
-      tooltip: {
-        mode: 'index',
-        intersect: false,
-      },
-    },
-    scales: {
-      y: {
-        min: 0,
-        ticks: {
-          callback: (value) => value.toFixed(4)
-        }
-      }
-    },
-    interaction: {
-      mode: 'nearest',
-      axis: 'x',
-      intersect: false
-    }
-  };
-
-  // Accuracy chart options with y-axis limited to 0-1 range
-  const accuracyChartOptions = {
-    ...lineChartOptions,
-    scales: {
-      ...lineChartOptions.scales,
-      y: {
-        min: 0,
-        max: 1,
-        ticks: {
-          callback: (value) => (value * 100).toFixed(1) + '%'
-        }
-      }
-    }
-  };
-
-  // Class distribution chart options
-  const pieChartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        position: 'right',
-        labels: {
-          boxWidth: 12
-        }
-      },
-      tooltip: {
-        callbacks: {
-          label: (context) => {
-            const label = context.label || '';
-            const value = context.raw || 0;
-            const total = context.dataset.data.reduce((a, b) => a + b, 0);
-            const percentage = ((value / total) * 100).toFixed(1);
-            return `${label}: ${value} (${percentage}%)`;
-          }
-        }
-      }
-    }
-  };
-
-  // Determine if we have history data for charts
-  const hasLossHistory = metrics.history?.loss && metrics.history.loss.length > 0;
-  const hasAccuracyHistory = metrics.history?.accuracy && metrics.history.accuracy.length > 0;
-  const hasClassDistribution = metrics.class_distribution && Object.keys(metrics.class_distribution).length > 0;
+function MetricsCards({ metrics }) {
+  const cards = [
+    { label: 'Test Accuracy', value: `${(metrics.test_accuracy * 100).toFixed(2)}%` },
+    metrics.f1_score != null && { label: 'F1 Score', value: metrics.f1_score.toFixed(4) },
+    metrics.precision != null && { label: 'Precision', value: metrics.precision.toFixed(4) },
+    metrics.recall != null && { label: 'Recall', value: metrics.recall.toFixed(4) },
+    metrics.training_time != null && { label: 'Training Time', value: `${metrics.training_time.toFixed(1)}s` },
+    metrics.best_val_loss != null && { label: 'Best Val Loss', value: metrics.best_val_loss.toFixed(4) },
+  ].filter(Boolean);
 
   return (
-    <div className="metrics-visualizer" ref={chartsContainerRef}>
-      <h3>Training Metrics Visualization</h3>
-      
-      <div className="metrics-charts-container">
-        {/* Loss curve */}
-        {hasLossHistory && (
-          <div className="chart-container">
-            <h4>Loss Curve</h4>
-            <div className="chart-wrapper">
-              <Line data={getLossChartData()} options={lineChartOptions} />
-            </div>
-          </div>
-        )}
-        
-        {/* Accuracy curve */}
-        {hasAccuracyHistory && (
-          <div className="chart-container">
-            <h4>Accuracy Curve</h4>
-            <div className="chart-wrapper">
-              <Line data={getAccuracyChartData()} options={accuracyChartOptions} />
-            </div>
-          </div>
-        )}
-      </div>
-      
-      {/* Performance metrics display */}
-      <div className="performance-metrics">
-        <h4>Model Performance</h4>
-        <div className="metrics-grid">
-          <div className="metric-item">
-            <span className="metric-label">Test Accuracy:</span>
-            <span className="metric-value">{(metrics.test_accuracy * 100).toFixed(2)}%</span>
-          </div>
-          
-          {metrics.f1_score !== undefined && (
-            <div className="metric-item">
-              <span className="metric-label">F1 Score:</span>
-              <span className="metric-value">{metrics.f1_score.toFixed(4)}</span>
-            </div>
-          )}
-          
-          {metrics.precision !== undefined && (
-            <div className="metric-item">
-              <span className="metric-label">Precision:</span>
-              <span className="metric-value">{metrics.precision.toFixed(4)}</span>
-            </div>
-          )}
-          
-          {metrics.recall !== undefined && (
-            <div className="metric-item">
-              <span className="metric-label">Recall:</span>
-              <span className="metric-value">{metrics.recall.toFixed(4)}</span>
-            </div>
-          )}
-          
-          {metrics.training_time && (
-            <div className="metric-item">
-              <span className="metric-label">Training Time:</span>
-              <span className="metric-value">{metrics.training_time.toFixed(2)}s</span>
-            </div>
-          )}
+    <div className="metrics-grid">
+      {cards.map(({ label, value }) => (
+        <div key={label} className="metric-card">
+          <div className="metric-card-value">{value}</div>
+          <div className="metric-card-label">{label}</div>
         </div>
-      </div>
-      
-      {/* Class distribution */}
-      {hasClassDistribution && (
-        <div className="chart-container class-distribution">
-          <h4>Class Distribution</h4>
-          <div className="chart-wrapper pie-chart-wrapper">
-            <Pie data={getClassDistributionData()} options={pieChartOptions} />
+      ))}
+    </div>
+  );
+}
+
+function MetricsCharts({ metrics }) {
+  const history = metrics.history || {};
+  const hasLoss = history.loss?.length > 0;
+  const hasAcc = history.accuracy?.length > 0;
+
+  if (!hasLoss && !hasAcc) {
+    return <div className="stats-panel-empty"><p>No training history available for charts.</p></div>;
+  }
+
+  const epochs = Array.from({ length: history.loss?.length || 0 }, (_, i) => i + 1);
+
+  const chartOpts = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { position: 'top', labels: { color: '#8b949e', boxWidth: 12 } }, tooltip: { mode: 'index', intersect: false } },
+    scales: {
+      x: { ticks: { color: '#6e7681' }, grid: { color: '#21262d' } },
+      y: { ticks: { color: '#6e7681' }, grid: { color: '#21262d' } },
+    },
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, height: '100%' }}>
+      {hasLoss && (
+        <div style={{ flex: 1, minHeight: 200 }}>
+          <h4 style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', marginBottom: 8 }}>Loss Curve</h4>
+          <div className="chart-wrapper">
+            <Line
+              data={{
+                labels: epochs,
+                datasets: [
+                  { label: 'Train Loss', data: history.loss, borderColor: '#f85149', backgroundColor: 'rgba(248,81,73,0.1)', fill: true, tension: 0.4 },
+                  { label: 'Val Loss', data: history.val_loss || [], borderColor: '#58a6ff', backgroundColor: 'rgba(88,166,255,0.1)', fill: true, tension: 0.4 },
+                ],
+              }}
+              options={chartOpts}
+            />
           </div>
         </div>
       )}
-      
-      {/* Classification report if available */}
-      {metrics.class_report && (
-        <div className="classification-report">
-          <h4>Classification Report</h4>
-          <pre className="metric-report">{metrics.class_report}</pre>
+      {hasAcc && (
+        <div style={{ flex: 1, minHeight: 200 }}>
+          <h4 style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', marginBottom: 8 }}>Accuracy Curve</h4>
+          <div className="chart-wrapper">
+            <Line
+              data={{
+                labels: epochs,
+                datasets: [
+                  { label: 'Train Acc', data: history.accuracy, borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,0.1)', fill: true, tension: 0.4 },
+                  { label: 'Val Acc', data: history.val_accuracy || [], borderColor: '#d2a8ff', backgroundColor: 'rgba(210,168,255,0.1)', fill: true, tension: 0.4 },
+                ],
+              }}
+              options={{ ...chartOpts, scales: { ...chartOpts.scales, y: { ...chartOpts.scales.y, min: 0, max: 1, ticks: { ...chartOpts.scales.y.ticks, callback: v => (v * 100).toFixed(0) + '%' } } } }}
+            />
+          </div>
         </div>
       )}
     </div>
   );
-};
+}
+
+function MetricsReport({ metrics }) {
+  const hasClassDist = metrics.class_distribution && Object.keys(metrics.class_distribution).length > 0;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {metrics.class_report && (
+        <div>
+          <h4 style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', marginBottom: 8 }}>Classification Report</h4>
+          <pre className="metric-report">{metrics.class_report}</pre>
+        </div>
+      )}
+      {hasClassDist && (
+        <div>
+          <h4 style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', marginBottom: 8 }}>Class Distribution</h4>
+          <div style={{ height: 300 }}>
+            <Pie
+              data={{
+                labels: Object.keys(metrics.class_distribution),
+                datasets: [{
+                  data: Object.values(metrics.class_distribution),
+                  backgroundColor: Object.keys(metrics.class_distribution).map((_, i) => `hsla(${(i * 137) % 360}, 70%, 60%, 0.7)`),
+                  borderWidth: 0,
+                }],
+              }}
+              options={{
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: { position: 'right', labels: { color: '#8b949e', boxWidth: 12 } },
+                },
+              }}
+            />
+          </div>
+        </div>
+      )}
+      {!metrics.class_report && !hasClassDist && (
+        <div className="stats-panel-empty"><p>No detailed report available.</p></div>
+      )}
+    </div>
+  );
+}
 
 export default MetricsVisualizer;

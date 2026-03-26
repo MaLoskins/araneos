@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import Modal from 'react-modal';
-
-Modal.setAppElement('#root');
+import { Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
 
 const NodeEditModal = ({ isOpen, onRequestClose, node, onSaveNodeEdit }) => {
   const [nodeType, setNodeType] = useState(node.type || '');
@@ -20,33 +18,21 @@ const NodeEditModal = ({ isOpen, onRequestClose, node, onSaveNodeEdit }) => {
   };
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onRequestClose={onRequestClose}
-      contentLabel="Edit Node"
-      className="node-edit-modal"
-      overlayClassName="overlay"
-    >
-      <h2>Edit Node: {node.id}</h2>
+    <Dialog open={isOpen} onClose={onRequestClose} maxWidth="xs" fullWidth>
+      <DialogTitle>Edit Node: {node.id}</DialogTitle>
       <form onSubmit={handleSubmit}>
-        <div className="form-group">
-          <label htmlFor="node-type">Type:</label>
-          <input
-            type="text"
-            id="node-type"
-            value={nodeType}
-            onChange={(e) => setNodeType(e.target.value)}
-            placeholder="e.g., User, Post"
-          />
-        </div>
-        <div className="modal-buttons">
-          <button type="submit">Save</button>
-          <button type="button" onClick={onRequestClose}>
-            Cancel
-          </button>
-        </div>
+        <DialogContent>
+          <div className="form-group">
+            <label htmlFor="node-type">Type:</label>
+            <input type="text" id="node-type" value={nodeType} onChange={e => setNodeType(e.target.value)} placeholder="e.g., User, Post" />
+          </div>
+        </DialogContent>
+        <DialogActions>
+          <Button type="button" onClick={onRequestClose} sx={{ color: 'var(--text-secondary)' }}>Cancel</Button>
+          <Button type="submit" variant="contained" sx={{ bgcolor: 'var(--button-background)', '&:hover': { bgcolor: 'var(--button-hover)' } }}>Save</Button>
+        </DialogActions>
       </form>
-    </Modal>
+    </Dialog>
   );
 };
 

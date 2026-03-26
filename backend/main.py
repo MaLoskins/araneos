@@ -1,231 +1,216 @@
-# main.py
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Any, Dict, List, Optional, Union, Generator
-import pandas as pd, uvicorn, logging, os, numpy as np, json, torch
+from typing import Any, AsyncGenerator, Dict, List, Optional
+import pandas as pd
+import numpy as np
+import json
+import torch
+import logging
 from networkx.readwrite import json_graph
+
 from DataFrameToGraph import DataFrameToGraph
 from FeatureSpaceCreator import FeatureSpaceCreator
 from TorchGeometricGraphBuilder import (
-    TorchGeometricGraphBuilder,
-    split_data,
-    GCNModel,
-    GraphSageModel,
-    GATModel,
-    GINModel,
-    ChebConvModel,
-    ResidualGCNModel
+    TorchGeometricGraphBuilder, split_data,
+    GCNModel, GraphSageModel, GATModel, GINModel, ChebConvModel, ResidualGCNModel,
 )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- Request Models ---
 
 class ProcessDataRequest(BaseModel):
     data: List[Dict[str, Any]]
     config: Dict[str, Any]
 
 class ModelConfig(BaseModel):
-    model_name: str  # Name of the GNN model (e.g., "GCN", "GraphSAGE")
-    hidden_channels: int  # Size of hidden layers
-    lr: float  # Learning rate
-    epochs: int  # Number of training epochs
-    dropout: float  # Dropout rate
-    extra_params: Optional[Dict[str, Any]] = None  # For model-specific parameters
+    model_name: str
+    hidden_channels: int
+    lr: float
+    epochs: int
+    dropout: float
+    extra_params: Optional[Dict[str, Any]] = None
 
 class TrainGNNRequest(BaseModel):
-    graph: Dict[str, List]  # The node-link JSON graph data
-    configuration: ModelConfig  # The model configuration
+    graph: Dict[str, List]
+    configuration: ModelConfig
+
+# --- Model Factory ---
+
+def _create_model(name: str, in_ch: int, hidden_ch: int, num_cls: int, dropout: float, extra: dict):
+    """Factory function to create GNN models by name."""
+    key = name.upper()
+    if key in ('GCN',):
+        return GCNModel(in_ch, hidden_ch, num_cls, dropout)
+    if key in ('GRAPHSAGE', 'SAGE'):
+        return GraphSageModel(in_ch, hidden_ch, num_cls, dropout)
+    if key == 'GAT':
+        heads = extra.get('heads', 8)
+        return GATModel(in_ch, hidden_ch // heads, num_cls, heads, dropout)
+    if key == 'GIN':
+        return GINModel(in_ch, hidden_ch, num_cls, dropout)
+    if key in ('CHEBCONV', 'CHEB'):
+        return ChebConvModel(in_ch, hidden_ch, num_cls, extra.get('K', 3), dropout)
+    if key in ('RESIDUALGCN', 'RESGCN'):
+        return ResidualGCNModel(in_ch, hidden_ch, num_cls, dropout)
+    return None
+
+SUPPORTED_MODELS = {'GCN', 'GRAPHSAGE', 'SAGE', 'GAT', 'GIN', 'CHEBCONV', 'CHEB', 'RESIDUALGCN', 'RESGCN'}
+
+# --- Endpoints ---
 
 @app.post("/process-data")
-def process_data(req:ProcessDataRequest):
-    df=pd.DataFrame(req.data);config=req.config
-    
-    # Extract config values
-    nodes_config=config.get("nodes",[])
-    relationships=config.get("relationships",[])
-    graph_type=config.get("graph_type","directed")
-    label_column=config.get("label_column","")
-    use_feature_space=config.get("use_feature_space",False)
-    feature_space_config=config.get("feature_space_config",{})
-    user_features=config.get("features",[])
+def process_data(req: ProcessDataRequest):
+    df = pd.DataFrame(req.data)
+    config = req.config
 
-    # Build initial graph
-    graph_config={"nodes":nodes_config,"relationships":relationships,"graph_type":graph_type}
-    graph_data=json_graph.node_link_data(DataFrameToGraph(df,graph_config,graph_type=graph_type).get_graph())
+    nodes_config = config.get("nodes", [])
+    relationships = config.get("relationships", [])
+    graph_type = config.get("graph_type", "directed")
+    label_column = config.get("label_column", "")
+    use_feature_space = config.get("use_feature_space", False)
+    feature_space_config = config.get("feature_space_config", {})
+    user_features = config.get("features", [])
 
-    # Attach user-chosen label if valid
+    # Build graph
+    graph_config = {"nodes": nodes_config, "relationships": relationships, "graph_type": graph_type}
+    graph_data = json_graph.node_link_data(
+        DataFrameToGraph(df, graph_config, graph_type=graph_type).get_graph()
+    )
+
+    # Attach labels
     if label_column and label_column in df.columns:
         for node in graph_data["nodes"]:
-            node_id=str(node["id"])
+            node_id = str(node["id"])
             for nc in nodes_config:
-                matching_rows=df.loc[df[nc["id"]].astype(str)==node_id]
-                if not matching_rows.empty:
-                    "features" not in node and node.update({"features":{}})
-                    node["features"]["label"]=str(matching_rows[label_column].values[0])
+                matching = df.loc[df[nc["id"]].astype(str) == node_id]
+                if not matching.empty:
+                    node.setdefault("features", {})
+                    node["features"]["label"] = str(matching[label_column].values[0])
                     break
 
-    # Generate embeddings if requested
-    feature_data=None
+    # Generate embeddings
+    feature_data = None
     if use_feature_space and feature_space_config:
         logger.info("Generating embeddings with FeatureSpaceCreator.")
-        feature_data=FeatureSpaceCreator(config=feature_space_config,device="cuda").process(df)
-        
-        # Process each feature
+        feature_data = FeatureSpaceCreator(config=feature_space_config, device="cuda").process(df)
+
         for feat in user_features:
-            node_id_col,col_name=feat.get("node_id_column"),feat.get("column_name")
-            feat_type=feat.get("type","text").lower()
-            
-            # Skip if missing required fields
+            node_id_col = feat.get("node_id_column")
+            col_name = feat.get("column_name")
+            feat_type = feat.get("type", "text").lower()
+
             if not node_id_col or not col_name:
-                logger.warning(f"Skipping feature {feat} - missing node_id_column or column_name.")
+                logger.warning(f"Skipping feature {feat} - missing required fields.")
                 continue
-                
-            # Determine feature column name
-            feature_col_name=f"{col_name}_{'embedding' if feat_type=='text' else 'feature'}"
-            if feature_col_name not in feature_data.columns:
-                logger.warning(f"Feature column '{feature_col_name}' not found. Skipping.")
+
+            feature_col = f"{col_name}_{'embedding' if feat_type == 'text' else 'feature'}"
+            if feature_col not in feature_data.columns:
+                logger.warning(f"Feature column '{feature_col}' not found. Skipping.")
                 continue
-                
-            # Ensure node_id_col exists in feature_data
+
             if node_id_col not in feature_data.columns:
                 if node_id_col not in df.columns:
                     logger.error(f"Column '{node_id_col}' not in CSV. Cannot attach features.")
                     continue
-                feature_data[node_id_col]=df[node_id_col]
+                feature_data[node_id_col] = df[node_id_col]
 
-            # Attach features to nodes
-            for _,row in feature_data.iterrows():
-                if pd.isnull(row[node_id_col]):continue
-                node_id_str=str(row[node_id_col])
-                val=row[feature_col_name].tolist() if isinstance(row[feature_col_name],np.ndarray) else row[feature_col_name]
-                
-                # Find matching node and attach feature
+            for _, row in feature_data.iterrows():
+                if pd.isnull(row[node_id_col]):
+                    continue
+                node_id_str = str(row[node_id_col])
+                val = row[feature_col].tolist() if isinstance(row[feature_col], np.ndarray) else row[feature_col]
+
                 for n in graph_data["nodes"]:
-                    if str(n["id"])==node_id_str:
-                        "features" not in n and n.update({"features":{}})
-                        n["features"][feature_col_name]=val
+                    if str(n["id"]) == node_id_str:
+                        n.setdefault("features", {})
+                        n["features"][feature_col] = val
                         break
 
         logger.info("Feature embeddings attached to graph nodes.")
-    else:logger.info("No advanced embeddings requested.")
+    else:
+        logger.info("No advanced embeddings requested.")
 
-    # Return results
+    # NetworkX 3.x uses 'edges' key; older versions used 'links'
+    edge_key = 'edges' if 'edges' in graph_data else 'links'
+    edge_list = graph_data.get(edge_key, [])
+    logger.info(f"Returning graph with {len(graph_data.get('nodes', []))} nodes, {len(edge_list)} edges (key='{edge_key}')")
+    if edge_list:
+        logger.info(f"Sample edge: {edge_list[0]}")
+
     return {
-        "graph":graph_data,
-        "featureDataCsv":feature_data.to_csv(index=False) if feature_data is not None else None
+        "graph": graph_data,
+        "featureDataCsv": feature_data.to_csv(index=False) if feature_data is not None else None,
     }
+
 
 @app.post("/train-gnn")
 async def train_gnn(request: TrainGNNRequest) -> StreamingResponse:
-    """
-    Trains a Graph Neural Network using provided graph data and model configuration.
-    
-    This endpoint:
-    1. Builds a PyTorch Geometric Data object from the provided graph
-    2. Instantiates the requested GNN model
-    3. Sets up training components (optimizer, criterion, scheduler)
-    4. Streams back training metrics for each epoch
-    
-    Args:
-        request: TrainGNNRequest containing graph data and model configuration
-        
-    Returns:
-        StreamingResponse that yields training metrics in JSON format
-    
-    Raises:
-        HTTPException: If invalid model requested or missing labels in the data
-    """
+    """Train a GNN model and stream back metrics."""
     try:
-        # Build PyTorch Geometric Data object
         graph_builder = TorchGeometricGraphBuilder(request.graph)
         data = graph_builder.build_data()
-        
-        # Check if we have labels for training
+
         if data.y is None:
-            raise HTTPException(
-                status_code=400,
-                detail="No labels found in the graph data. Node classification requires labeled nodes."
-            )
-        
-        # Get the number of classes and features
+            raise HTTPException(status_code=400, detail="No labels found. Node classification requires labeled nodes.")
+
         unique_labels = torch.unique(data.y)
-        # Remove unlabeled nodes (marked with -1) when counting classes
         num_classes = len(unique_labels) - (1 if -1 in unique_labels else 0)
-        
+
+        # Diagnostic logging
+        logger.info(f"[TRAIN] Nodes: {data.num_nodes}, Edges: {data.edge_index.shape[1]}, Features per node: {data.num_node_features}")
+        logger.info(f"[TRAIN] Labels: {unique_labels.tolist()}, Num classes: {num_classes}")
+        label_counts = {l.item(): (data.y == l).sum().item() for l in unique_labels}
+        logger.info(f"[TRAIN] Label distribution: {label_counts}")
+        logger.info(f"[TRAIN] Feature sample (node 0, first 10): {data.x[0][:10].tolist()}")
+        logger.info(f"[TRAIN] Feature std: {data.x.std().item():.6f}, mean: {data.x.mean().item():.6f}")
+
         if num_classes < 2:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Insufficient number of classes ({num_classes}) for classification. Need at least 2 classes."
-            )
-        
-        # Split data into train/validation/test sets
+            raise HTTPException(status_code=400, detail=f"Need at least 2 classes, found {num_classes}.")
+
         data = split_data(data, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1)
-        
-        # Determine device (CPU or GPU)
+
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         data = data.to(device)
-        
-        # Extract configuration
+
         config = request.configuration
-        model_name = config.model_name
-        hidden_channels = config.hidden_channels
         in_channels = data.num_node_features
-        dropout = config.dropout
-        lr = config.lr
-        epochs = config.epochs
         extra_params = config.extra_params or {}
-        
-        # Instantiate the requested model
-        if model_name.upper() == "GCN":
-            model = GCNModel(in_channels, hidden_channels, num_classes, dropout)
-        elif model_name.upper() == "GRAPHSAGE" or model_name.upper() == "SAGE":
-            model = GraphSageModel(in_channels, hidden_channels, num_classes, dropout)
-        elif model_name.upper() == "GAT":
-            heads = extra_params.get("heads", 8)
-            model = GATModel(in_channels, hidden_channels // heads, num_classes, heads, dropout)
-        elif model_name.upper() == "GIN":
-            model = GINModel(in_channels, hidden_channels, num_classes, dropout)
-        elif model_name.upper() == "CHEBCONV" or model_name.upper() == "CHEB":
-            k = extra_params.get("K", 3)
-            model = ChebConvModel(in_channels, hidden_channels, num_classes, k, dropout)
-        elif model_name.upper() == "RESIDUALGCN" or model_name.upper() == "RESGCN":
-            model = ResidualGCNModel(in_channels, hidden_channels, num_classes, dropout)
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported model: {model_name}. Available models: GCN, GraphSAGE, GAT, GIN, ChebConv, ResidualGCN"
-            )
-        
-        # Move model to device
+
+        # Create model
+        model = _create_model(config.model_name, in_channels, config.hidden_channels, num_classes, config.dropout, extra_params)
+        if model is None:
+            raise HTTPException(status_code=400, detail=f"Unsupported model: {config.model_name}. Available: {', '.join(sorted(SUPPORTED_MODELS))}")
         model = model.to(device)
-        
-        # Setup optimizer and loss function
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=5e-4)
+
+        optimizer = torch.optim.Adam(model.parameters(), lr=config.lr, weight_decay=5e-4)
         criterion = torch.nn.CrossEntropyLoss()
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=0.5, patience=5, verbose=True
-        )
-        
-        # Define the streaming function to yield training progress
-        async def training_stream() -> Generator[str, None, None]:
-            # Initial message
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
+
+        async def training_stream() -> AsyncGenerator[str, None]:
             yield json.dumps({
                 "status": "started",
-                "message": f"Training {model_name} model",
+                "message": f"Training {config.model_name} model",
                 "epoch": 0,
-                "total_epochs": epochs
+                "total_epochs": config.epochs,
             }) + "\n"
-            
-            # Train for the specified number of epochs
+
             best_val_loss = float('inf')
-            
-            for epoch in range(1, epochs + 1):
-                # Training step
+
+            for epoch in range(1, config.epochs + 1):
+                # Train
                 model.train()
                 optimizer.zero_grad()
                 out = model(data.x, data.edge_index)
@@ -234,63 +219,52 @@ async def train_gnn(request: TrainGNNRequest) -> StreamingResponse:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
                 train_loss = loss.item()
-                
-                # Validation step
+
+                # Validate
                 model.eval()
                 with torch.no_grad():
                     out = model(data.x, data.edge_index)
                     val_loss = criterion(out[data.val_mask], data.y[data.val_mask]).item()
-                    
-                    # Calculate validation accuracy
                     pred = out[data.val_mask].argmax(dim=1)
                     val_acc = (pred == data.y[data.val_mask]).sum().item() / data.val_mask.sum().item()
-                
-                # Update learning rate scheduler
+
                 scheduler.step(val_loss)
-                
-                # Check if this is the best model so far
                 is_best = val_loss < best_val_loss
                 if is_best:
                     best_val_loss = val_loss
-                
-                # Yield the epoch results
+
                 yield json.dumps({
                     "epoch": epoch,
-                    "total_epochs": epochs,
+                    "total_epochs": config.epochs,
                     "train_loss": train_loss,
                     "val_loss": val_loss,
                     "val_accuracy": val_acc,
-                    "is_best_model": is_best
+                    "is_best_model": is_best,
                 }) + "\n"
-            
-            # Final evaluation on test set
+
+            # Test
             model.eval()
             with torch.no_grad():
                 out = model(data.x, data.edge_index)
                 test_pred = out[data.test_mask].argmax(dim=1)
                 test_acc = (test_pred == data.y[data.test_mask]).sum().item() / data.test_mask.sum().item()
-            
-            # Yield final results
+
             yield json.dumps({
                 "status": "completed",
                 "message": "Training completed",
                 "test_accuracy": test_acc,
-                "best_val_loss": best_val_loss
+                "best_val_loss": best_val_loss,
             }) + "\n"
-        
-        # Return streaming response
-        return StreamingResponse(
-            training_stream(),
-            media_type="application/x-ndjson"
-        )
-        
-    except HTTPException as http_ex:
-        # Re-raise HTTP exceptions
-        raise http_ex
+
+        return StreamingResponse(training_stream(), media_type="application/x-ndjson")
+
+    except HTTPException:
+        raise
     except Exception as e:
-        # Convert other exceptions to HTTP exceptions
-        logger.error(f"Error training GNN: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error training GNN: {str(e)}")
+        logger.error(f"Error training GNN: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error training GNN: {e}")
+
 
 if __name__ == "__main__":
+    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

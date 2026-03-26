@@ -1,153 +1,111 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
-import InfoButton from '../InfoButton';
-import sectionsInfo from '../../sectionsInfo';
 
-const GraphVisualizer = ({ graphData, onNodeClick }) => {
+const GraphVisualizer = ({ graphData }) => {
   const fgRef = useRef();
   const containerRef = useRef(null);
-
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
-  const [processedGraphData, setProcessedGraphData] = useState(null);
   const [hoverNode, setHoverNode] = useState(null);
 
-  useEffect(() => {
-    if (fgRef.current) {
-      fgRef.current.d3Force('charge').strength(-200);
-    }
-  }, []);
+  const processedGraphData = useMemo(() => {
+    if (!graphData?.nodes?.length) return null;
+    const rawLinks = graphData.edges || graphData.links || [];
+    if (!rawLinks.length) return null;
 
-  useEffect(() => {
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (let entry of entries) {
-        const { width, height } = entry.contentRect;
-        setDimensions({ width, height });
-      }
+    const nodes = JSON.parse(JSON.stringify(graphData.nodes));
+    const nodeMap = new Map(nodes.map(n => [String(n.id), n]));
+    const links = [];
+    const degrees = {};
+
+    for (const link of rawLinks) {
+      const src = link.source;
+      const tgt = link.target;
+      const srcId = String(typeof src === 'object' && src !== null ? (src.id ?? src) : src);
+      const tgtId = String(typeof tgt === 'object' && tgt !== null ? (tgt.id ?? tgt) : tgt);
+      if (!nodeMap.has(srcId) || !nodeMap.has(tgtId)) continue;
+      links.push({ source: srcId, target: tgtId, type: link.type || link.key });
+      degrees[srcId] = (degrees[srcId] || 0) + 1;
+      degrees[tgtId] = (degrees[tgtId] || 0) + 1;
+    }
+
+    nodes.forEach(node => {
+      node.val = Math.max(1, Math.sqrt(degrees[node.id] || 1));
+      node.type = node.type || 'default';
+      if (node.label === undefined) node.label = node.id;
     });
-    if (containerRef.current) {
-      resizeObserver.observe(containerRef.current);
-    }
-    return () => {
-      if (containerRef.current) {
-        resizeObserver.unobserve(containerRef.current);
-      }
-    };
-  }, [containerRef]);
 
-  useEffect(() => {
-    if (graphData?.nodes && (graphData?.links || graphData?.edges)) {
-      // Always use 'links' for D3, mapping from 'edges' if necessary
-      const links = graphData.links
-        ? JSON.parse(JSON.stringify(graphData.links))
-        : JSON.parse(JSON.stringify(graphData.edges));
-
-      const nodes = JSON.parse(JSON.stringify(graphData.nodes));
-      const nodeMap = new Map();
-      nodes.forEach(node => {
-        nodeMap.set(node.id, node);
-      });
-
-      // Filter out links whose source/target are not present in nodes
-      const validLinks = links.filter(link => {
-        const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
-        const targetId = typeof link.target === 'object' ? link.target.id : link.target;
-        return nodeMap.has(sourceId) && nodeMap.has(targetId);
-      });
-
-      // Calculate node degrees for sizing
-      const degrees = {};
-      validLinks.forEach(link => {
-        const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
-        const targetId = typeof link.target === 'object' ? link.target.id : link.target;
-
-        degrees[sourceId] = (degrees[sourceId] || 0) + 1;
-        degrees[targetId] = (degrees[targetId] || 0) + 1;
-
-        // Replace references directly in the links array
-        link.source = sourceId;
-        link.target = targetId;
-      });
-
-      // Update node properties
-      nodes.forEach(node => {
-        node.val = degrees[node.id] || 1;
-        node.type = node.type || 'default';
-        if (node.label === undefined) {
-          node.label = node.id;
-        }
-      });
-
-      setProcessedGraphData({
-        nodes,
-        links: validLinks,
-        directed: graphData.directed
-      });
-    }
+    return { nodes, links, directed: graphData.directed };
   }, [graphData]);
 
-  // Configure the background color from CSS variables
-  const backgroundColor = getComputedStyle(document.documentElement)
-    .getPropertyValue('--background-color')
-    .trim() || '#121212';
+  useEffect(() => {
+    if (!fgRef.current || !processedGraphData) return;
+    const fg = fgRef.current;
+    const nc = processedGraphData.nodes.length;
+    // Gentler forces: enough to separate but not scatter
+    const charge = nc > 500 ? -30 : nc > 100 ? -80 : -150;
+    const linkDist = nc > 500 ? 10 : nc > 100 ? 20 : 40;
+    fg.d3Force('charge').strength(charge);
+    fg.d3Force('link').distance(linkDist);
+    // Zoom to fit after layout settles
+    setTimeout(() => fg.zoomToFit(400, 60), nc > 500 ? 3000 : 1500);
+  }, [processedGraphData]);
 
-  // Determine if directed graph
-  const isDirected = graphData && graphData.directed === true;
+  useEffect(() => {
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) setDimensions({ width: entry.contentRect.width, height: entry.contentRect.height });
+    });
+    const node = containerRef.current;
+    if (node) observer.observe(node);
+    return () => { if (node) observer.unobserve(node); };
+  }, []);
+
+  const nc = processedGraphData?.nodes?.length || 0;
+  const isLarge = nc > 500;
+  const isMedium = nc > 100;
 
   return (
-    <div className="graph-section">
-      <h2>
-        Graph Visualization
-        <InfoButton
-          title={sectionsInfo.graphVisualization.title}
-          description={sectionsInfo.graphVisualization.description}
-        />
-      </h2>
-      <div className="graph-container" ref={containerRef}>
-        {processedGraphData && (
+    <div className="graph-viz-container" ref={containerRef}>
+      {processedGraphData && (
+        <>
+          <div className="graph-viz-badge">
+            <span className="stat-chip">{processedGraphData.nodes.length} nodes</span>
+            <span className="stat-chip">{processedGraphData.links.length} edges</span>
+          </div>
           <ForceGraph2D
             ref={fgRef}
             graphData={processedGraphData}
             nodeAutoColorBy="type"
-            linkAutoColorBy="type"
-            nodeLabel={(node) => `${node.id}${node.label && node.label !== node.id ? ` (${node.label})` : ''}`}
-            linkLabel="type"
-            nodeVal={(node) => node.val || 1}
-            onNodeClick={(node) => {
-              if (onNodeClick) onNodeClick(node);
-            }}
-            onNodeHover={(node) => {
-              setHoverNode(node);
-            }}
+            nodeLabel={n => `${n.id}${n.label && n.label !== n.id ? ` (${n.label})` : ''}`}
+            nodeVal={n => n.val || 1}
+            nodeRelSize={isLarge ? 2 : isMedium ? 4 : 6}
+            onNodeHover={setHoverNode}
             onBackgroundClick={() => setHoverNode(null)}
-            linkDirectionalArrowLength={isDirected ? 6 : 0}
+            linkDirectionalArrowLength={graphData?.directed ? 4 : 0}
             linkDirectionalArrowRelPos={0.5}
+            linkWidth={isLarge ? 0.3 : isMedium ? 0.5 : 1}
+            linkColor={() => 'rgba(88,166,255,0.2)'}
             width={dimensions.width}
             height={dimensions.height}
-            backgroundColor={backgroundColor}
+            backgroundColor="#0d1117"
+            cooldownTicks={isLarge ? 300 : isMedium ? 200 : 100}
+            warmupTicks={isLarge ? 100 : isMedium ? 50 : 0}
           />
-        )}
-        {hoverNode && (
-          <div className="node-tooltip">
-            <strong>ID:</strong> {hoverNode.id}<br />
-            {hoverNode.label && hoverNode.label !== hoverNode.id && (
-              <><strong>Label:</strong> {hoverNode.label}<br /></>
-            )}
-            <strong>Type:</strong> {hoverNode.type || 'default'}<br />
-            {hoverNode.features && Object.keys(hoverNode.features).length > 0 && (
-              <div>
-                <strong>Features:</strong>
-                {Object.entries(hoverNode.features).map(([key, value]) => (
-                  <div key={key} style={{ marginLeft: '10px' }}>
-                    <strong>{key}:</strong> {Array.isArray(value) 
-                      ? value.slice(0, 3).map(f => JSON.stringify(f)).join(', ') + (value.length > 3 ? '...' : '')
-                      : JSON.stringify(value)}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+        </>
+      )}
+      {hoverNode && (
+        <div className="node-tooltip">
+          <strong>{hoverNode.id}</strong>
+          {hoverNode.label && hoverNode.label !== hoverNode.id && <div>Label: {hoverNode.label}</div>}
+          <div>Type: {hoverNode.type || 'default'}</div>
+          {hoverNode.features && Object.keys(hoverNode.features).length > 0 && (
+            <div style={{ marginTop: 4 }}>
+              {Object.entries(hoverNode.features).map(([key, value]) => (
+                <div key={key}><strong>{key}:</strong> {Array.isArray(value) ? `[${value.length}d vector]` : String(value)}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

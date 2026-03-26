@@ -11,6 +11,8 @@
 
 A comprehensive Graph Neural Network (GNN) application for transforming tabular data into graph representations with rich feature embeddings for machine learning and network analysis.
 
+![Dashboard Example](examples/dashboard.png)
+
 ## 📋 Table of Contents
 
 - [Araneos: A Dynamic Graph Intelligence Platform for GNN-Driven Data Modeling](#araneos-a-dynamic-graph-intelligence-platform-for-gnn-driven-data-modeling)

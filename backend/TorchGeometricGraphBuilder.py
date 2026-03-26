@@ -150,27 +150,42 @@ class TorchGeometricGraphBuilder:
             self.node_id_map[node_id] = idx
 
         # 2) Collect node features & labels
+        # First pass: determine which feature keys exist across all nodes
+        # so we can build consistent-length vectors
+        feature_keys = []
+        for node_obj in all_nodes:
+            feats_dict = node_obj.get("features", {})
+            for key in feats_dict:
+                if key == "label":
+                    continue
+                if key not in feature_keys:
+                    feature_keys.append(key)
+        # Sort for deterministic ordering
+        feature_keys.sort()
+
         node_features_list = []
         labels_list = []
         for node_obj in all_nodes:
             feats_dict = node_obj.get("features", {})
             feats_vector = []
 
-            # Example numeric feature
-            if "user_followers_count_feature" in feats_dict:
-                try:
-                    feats_vector.append(float(feats_dict["user_followers_count_feature"]))
-                except ValueError:
-                    print(f"Invalid value for 'user_followers_count_feature' in node {node_obj['id']}. Using 0.0.")
-                    feats_vector.append(0.0)
-
-            # Example text embedding
-            if "text_embedding" in feats_dict:
-                try:
-                    feats_vector.extend([float(val) for val in feats_dict["text_embedding"]])
-                except ValueError:
-                    print(f"Invalid values in 'text_embedding' for node {node_obj['id']}. Using zeros.")
-                    feats_vector.extend([0.0] * len(feats_dict["text_embedding"]))
+            for key in feature_keys:
+                val = feats_dict.get(key, None)
+                if val is None:
+                    # Will be padded below
+                    continue
+                elif isinstance(val, (list, np.ndarray)):
+                    try:
+                        feats_vector.extend([float(v) for v in val])
+                    except (ValueError, TypeError):
+                        print(f"Invalid values in '{key}' for node {node_obj['id']}. Using zeros.")
+                        feats_vector.extend([0.0] * len(val))
+                elif isinstance(val, (int, float)):
+                    try:
+                        feats_vector.append(float(val))
+                    except (ValueError, TypeError):
+                        feats_vector.append(0.0)
+                # Skip string features (like labels) that aren't numeric
 
             # If no features found, add a dummy
             if not feats_vector:
@@ -186,14 +201,15 @@ class TorchGeometricGraphBuilder:
         x = self._normalize_features(x)
 
         # 4) Build edge_index
-        all_links = self.data_json.get("links", [])
+        all_links = self.data_json.get("links", self.data_json.get("edges", []))
         source_indices = []
         target_indices = []
         for link_obj in all_links:
-            source_dict = link_obj.get("source", {})
-            target_dict = link_obj.get("target", {})
-            s_id = str(source_dict.get("id", ""))
-            t_id = str(target_dict.get("id", ""))
+            source_val = link_obj.get("source", {})
+            target_val = link_obj.get("target", {})
+            # Handle both dict format {"id": "x"} and plain string "x"
+            s_id = str(source_val.get("id", "")) if isinstance(source_val, dict) else str(source_val)
+            t_id = str(target_val.get("id", "")) if isinstance(target_val, dict) else str(target_val)
             s_idx = self.node_id_map.get(s_id)
             t_idx = self.node_id_map.get(t_id)
 

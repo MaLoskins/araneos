@@ -1,7 +1,5 @@
 import React, { useState } from 'react';
-import Modal from 'react-modal';
-
-Modal.setAppElement('#root');
+import { Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
 
 const RelationshipModal = ({ isOpen, onRequestClose, onSaveRelationship }) => {
   const [relationshipType, setRelationshipType] = useState('');
@@ -12,33 +10,21 @@ const RelationshipModal = ({ isOpen, onRequestClose, onSaveRelationship }) => {
   };
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onRequestClose={onRequestClose}
-      contentLabel="Define Relationship"
-      className="node-edit-modal relationship-modal"
-      overlayClassName="overlay"
-    >
-      <h2>Define Relationship</h2>
+    <Dialog open={isOpen} onClose={onRequestClose} maxWidth="xs" fullWidth>
+      <DialogTitle>Define Relationship</DialogTitle>
       <form onSubmit={handleSubmit}>
-        <div className="form-group">
-          <label htmlFor="rel-type">Relationship Type:</label>
-          <input
-            type="text"
-            id="rel-type"
-            value={relationshipType}
-            onChange={(e) => setRelationshipType(e.target.value)}
-            placeholder="e.g., connects, influences"
-          />
-        </div>
-        <div className="modal-buttons">
-          <button type="submit">Save</button>
-          <button type="button" onClick={onRequestClose}>
-            Cancel
-          </button>
-        </div>
+        <DialogContent>
+          <div className="form-group">
+            <label htmlFor="rel-type">Relationship Type:</label>
+            <input type="text" id="rel-type" value={relationshipType} onChange={e => setRelationshipType(e.target.value)} placeholder="e.g., connects, influences" />
+          </div>
+        </DialogContent>
+        <DialogActions>
+          <Button type="button" onClick={onRequestClose} sx={{ color: 'var(--text-secondary)' }}>Cancel</Button>
+          <Button type="submit" variant="contained" sx={{ bgcolor: 'var(--button-background)', '&:hover': { bgcolor: 'var(--button-hover)' } }}>Save</Button>
+        </DialogActions>
       </form>
-    </Modal>
+    </Dialog>
   );
 };
 

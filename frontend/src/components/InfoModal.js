@@ -1,28 +1,19 @@
-// src/components/InfoModal.js
 import React from 'react';
-import Modal from 'react-modal';
+import { Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
 
-Modal.setAppElement('#root');
-
-const InfoModal = ({ isOpen, onRequestClose, title, description }) => {
-  return (
-    <Modal
-      isOpen={isOpen}
-      onRequestClose={onRequestClose}
-      contentLabel="Information Modal"
-      className="node-edit-modal info-modal-content"
-      overlayClassName="overlay"
-    >
-      <h2 className="info-modal-title">{title}</h2>
-      <div 
-        className="info-modal-description" 
-        dangerouslySetInnerHTML={{ __html: description }}
-      />
-      <div className="modal-buttons">
-        <button onClick={onRequestClose}>Close</button>
-      </div>
-    </Modal>
-  );
-};
+const InfoModal = ({ isOpen, onRequestClose, title, description }) => (
+  <Dialog open={isOpen} onClose={onRequestClose} maxWidth="sm" fullWidth>
+    <DialogTitle>{title}</DialogTitle>
+    <DialogContent>
+      <div dangerouslySetInnerHTML={{ __html: description }} />
+    </DialogContent>
+    <DialogActions>
+      <Button onClick={onRequestClose} variant="contained" size="small"
+        sx={{ bgcolor: 'var(--button-background)', '&:hover': { bgcolor: 'var(--button-hover)' } }}>
+        Close
+      </Button>
+    </DialogActions>
+  </Dialog>
+);
 
 export default InfoModal;

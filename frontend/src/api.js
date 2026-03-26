@@ -2,102 +2,53 @@ import axios from 'axios';
 
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000';
 
-/**
- * Processes data using the backend API
- * @param {Object} data - The data to process
- * @param {Object} config - Configuration for processing
- * @returns {Promise<Object>} - The processed data
- */
 export const processData = async (data, config) => {
-  try {
-    const response = await axios.post(`${API_BASE_URL}/process-data`, { data, config });
-    return response.data;
-  } catch (error) {
-    throw error;
-  }
+  const response = await axios.post(`${API_BASE_URL}/process-data`, { data, config });
+  return response.data;
 };
 
-/**
- * Trains a GNN model on the provided graph data and streams back results
- * @param {Object} graph - The graph data in node-link format
- * @param {Object} modelConfig - Configuration for the GNN model
- * @param {Function} onMessage - Callback for each training update
- * @param {Function} onError - Callback for error handling
- * @returns {Object} - The axios request object for potential cancellation
- */
 export const trainModel = (graph, modelConfig, onMessage, onError) => {
-  // Input validation
-  if (!graph || !graph.nodes || !graph.links) {
-    const error = new Error('Invalid graph data: Must contain nodes and links');
-    onError(error);
-    return Promise.reject(error);
-  }
-  
-  if (!modelConfig || !modelConfig.model_name) {
-    const error = new Error('Invalid model configuration: Missing required parameters');
-    onError(error);
-    return Promise.reject(error);
-  }
-  
-  if (typeof onMessage !== 'function') {
-    const error = new Error('onMessage must be a function');
-    onError(error);
-    return Promise.reject(error);
-  }
-  
-  if (typeof onError !== 'function') {
-    console.error('onError must be a function, using default error handler');
-    onError = (err) => console.error('Training error:', err);
+  if (!graph?.nodes || !graph?.links) {
+    const err = new Error('Invalid graph data: Must contain nodes and links');
+    onError(err);
+    return Promise.reject(err);
   }
 
-  try {
-    // Create the request configuration
-    const config = {
-      url: `${API_BASE_URL}/train-gnn`,
-      method: 'POST',
-      data: {
-        graph: graph,
-        configuration: modelConfig
-      },
-      responseType: 'stream',
-      
-      // Handle streaming response with event handlers
-      onDownloadProgress: (progressEvent) => {
-        // Parse the raw response text and handle each chunk
-        const rawText = progressEvent.currentTarget.response;
-        if (!rawText) return;
-        
-        // Split the text by newlines to get individual JSON messages
-        const messages = rawText.split('\n').filter(line => line.trim());
-        
-        // Process only new messages since last update
-        const lastProcessedIndex = progressEvent.lastProcessedIndex || 0;
-        const newMessages = messages.slice(lastProcessedIndex);
-        
-        // Process each new message
-        newMessages.forEach(message => {
-          try {
-            const parsedMessage = JSON.parse(message);
-            onMessage(parsedMessage);
-          } catch (parseError) {
-            console.warn('Error parsing training message:', parseError);
-          }
-        });
-        
-        // Update the last processed index
-        progressEvent.lastProcessedIndex = messages.length;
-      }
-    };
-
-    // Execute the request
-    return axios(config).catch(error => {
-      // Handle request errors
-      onError(error);
-      throw error;
-    });
-  } catch (error) {
-    // Handle any synchronous errors during request setup
-    onError(error);
-    return Promise.reject(error);
+  if (!modelConfig?.model_name) {
+    const err = new Error('Invalid model configuration: Missing model_name');
+    onError(err);
+    return Promise.reject(err);
   }
+
+  let lastProcessedIndex = 0;
+
+  return axios({
+    url: `${API_BASE_URL}/train-gnn`,
+    method: 'POST',
+    data: { graph, configuration: modelConfig },
+    responseType: 'text',
+    onDownloadProgress: (progressEvent) => {
+      // In browser, the raw response text is on the XMLHttpRequest target
+      const rawText = progressEvent.event?.target?.responseText
+        || progressEvent.currentTarget?.responseText
+        || progressEvent.currentTarget?.response
+        || '';
+      if (!rawText) return;
+
+      const messages = rawText.split('\n').filter(line => line.trim());
+      const newMessages = messages.slice(lastProcessedIndex);
+      lastProcessedIndex = messages.length;
+
+      newMessages.forEach(msg => {
+        try {
+          onMessage(JSON.parse(msg));
+        } catch {
+          // Skip incomplete JSON chunks
+        }
+      });
+    },
+  }).catch(error => {
+    onError(error);
+    throw error;
+  });
 };
