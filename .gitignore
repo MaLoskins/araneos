@@ -1,6 +1,5 @@
 /cat_files.sh
 /frontend/node_modules
-/frontend/public
 /frontend/package-lock.json
 /backend/.venv
 /backend/__pycache__
