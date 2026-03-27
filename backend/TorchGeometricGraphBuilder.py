@@ -19,7 +19,13 @@ def set_seed(seed:int=42):
 set_seed(42)
 
 # Device config
-device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device=torch.device('cpu')
+if torch.cuda.is_available():
+    try:
+        torch.zeros(1,device='cuda')
+        device=torch.device('cuda')
+    except Exception:
+        print("CUDA available but unusable (kernel mismatch), falling back to CPU")
 print(f"Using device: {device}")
 
 # Naive Bayes Baseline

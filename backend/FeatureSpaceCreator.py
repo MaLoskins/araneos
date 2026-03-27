@@ -239,7 +239,13 @@ class EmbeddingCreator:
         self.bert_model = None
         self.tokenizer = None
 
-        self.device = torch.device(device if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cpu")
+        if device == "cuda" and torch.cuda.is_available():
+            try:
+                torch.zeros(1, device="cuda")
+                self.device = torch.device("cuda")
+            except Exception:
+                logging.warning("CUDA available but unusable (kernel mismatch), falling back to CPU")
 
         if self.embedding_method == "glove":
             self._load_glove(glove_cache_path)

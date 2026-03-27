@@ -288,7 +288,13 @@ async def train_gnn(request: TrainRequest) -> StreamingResponse:
             raise HTTPException(status_code=400, detail=f"Need at least 2 classes, found {num_classes}.")
 
         data = split_data(data, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1)
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        device = torch.device('cpu')
+        if torch.cuda.is_available():
+            try:
+                torch.zeros(1, device='cuda')
+                device = torch.device('cuda')
+            except Exception:
+                logger.warning("CUDA available but unusable (kernel mismatch), falling back to CPU")
         data = data.to(device)
 
         config = request.configuration
