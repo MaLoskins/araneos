@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
 
 const GraphBuilderContext = createContext();
 
@@ -12,9 +12,8 @@ export function GraphBuilderProvider({ children }) {
   const [graphError, setGraphError] = useState(null);
   const [useFeatureSpace, setUseFeatureSpace] = useState(false);
   const [featureConfigs, setFeatureConfigs] = useState([]);
+  const [labelColumn, setLabelColumn] = useState('');
 
-  // ReactFlow nodes/edges stored as plain arrays (not useNodesState)
-  // because useNodesState is a hook that must be in a component
   const [flowNodes, setFlowNodes] = useState([]);
   const [flowEdges, setFlowEdges] = useState([]);
 
@@ -24,18 +23,26 @@ export function GraphBuilderProvider({ children }) {
     setFlowEdges([]);
     setUseFeatureSpace(false);
     setFeatureConfigs([]);
+    setLabelColumn('');
     setGraphError(null);
   }, []);
 
-  const value = {
+  const toggleFeatureSpace = useCallback(() => setUseFeatureSpace(p => !p), []);
+
+  const value = useMemo(() => ({
     csvData, setCsvData, columns, setColumns,
     config, setConfig, loading, setLoading,
     graphError, setGraphError,
-    useFeatureSpace, setUseFeatureSpace, toggleFeatureSpace: useCallback(() => setUseFeatureSpace(p => !p), []),
+    useFeatureSpace, setUseFeatureSpace, toggleFeatureSpace,
     featureConfigs, setFeatureConfigs,
+    labelColumn, setLabelColumn,
     flowNodes, setFlowNodes, flowEdges, setFlowEdges,
     resetBuilder,
-  };
+  }), [
+    csvData, columns, config, loading, graphError,
+    useFeatureSpace, featureConfigs, labelColumn,
+    flowNodes, flowEdges, resetBuilder, toggleFeatureSpace,
+  ]);
 
   return (
     <GraphBuilderContext.Provider value={value}>

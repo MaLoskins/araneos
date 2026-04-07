@@ -96,4 +96,4 @@ const ReactFlowWrapper = ({ nodes, edges, setNodes, setEdges, onConnect, onNodeC
   );
 };
 
-export default ReactFlowWrapper;
+export default React.memo(ReactFlowWrapper);

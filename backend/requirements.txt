@@ -1,6 +1,7 @@
 fastapi==0.115.4
 uvicorn==0.32.0
 pydantic==2.9.2
+pydantic-settings>=2.0
 python-multipart==0.0.17
 numpy==1.26.4
 pandas==2.2.3
@@ -16,3 +17,5 @@ umap-learn==0.5.7
 torch-geometric==2.6.1
 # torchaudio==2.3.0+cu118
 # torchvision==0.18.0+cu118
+redis[hiredis]>=5.0
+celery[redis]>=5.3

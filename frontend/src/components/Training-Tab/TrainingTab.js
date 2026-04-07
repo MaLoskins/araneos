@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { trainModel } from '../../api';
 import MetricsVisualizer from './MetricsVisualizer';
@@ -61,8 +61,9 @@ const TrainingTab = () => {
   }, [modelConfig.model_name, graphActions]);
 
   useEffect(() => {
-    if (logsContainerRef.current) logsContainerRef.current.scrollTop = logsContainerRef.current.scrollHeight;
-  }, [trainingLogs]);
+    const el = logsContainerRef.current;
+    if (el) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+  }, [trainingLogs.length]);
 
   const workflowStep = useMemo(() => {
     if (!sessionId) return 0;
@@ -71,7 +72,7 @@ const TrainingTab = () => {
     return 3;
   }, [sessionId, isTraining, metrics]);
 
-  const handleInputChange = (e) => {
+  const handleInputChange = useCallback((e) => {
     const { name, value } = e.target;
     let parsed = value;
     if (['hidden_channels', 'epochs', 'heads', 'K'].includes(name)) {
@@ -83,9 +84,9 @@ const TrainingTab = () => {
       if (name === 'dropout' && parsed > 1) return;
     }
     setModelConfig(prev => ({ ...prev, [name]: parsed }));
-  };
+  }, []);
 
-  const handleStartTraining = () => {
+  const handleStartTraining = useCallback(() => {
     if (!sessionId) return;
     graphActions.clearTrainingLogs();
     setMetrics(null);
@@ -134,13 +135,13 @@ const TrainingTab = () => {
       setTrainingError(error?.message || 'Training error');
       setIsTraining(false);
     }
-  };
+  }, [sessionId, modelConfig, graphActions]);
 
-  const handleStopTraining = () => {
+  const handleStopTraining = useCallback(() => {
     trainingRequestRef.current?.cancel?.();
     setIsTraining(false);
     graphActions.appendTrainingLog({ type: 'log', message: 'Training canceled', timestamp: new Date().toISOString() });
-  };
+  }, [graphActions]);
 
   // No graph data
   if (!graphStats.nodes || !graphStats.edges) {
@@ -287,4 +288,4 @@ const TrainingTab = () => {
   );
 };
 
-export default TrainingTab;
+export default React.memo(TrainingTab);

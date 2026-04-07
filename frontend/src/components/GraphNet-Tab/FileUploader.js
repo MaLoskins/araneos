@@ -17,7 +17,6 @@ const FileUploader = ({ onFileDrop, hasFile }) => {
       complete: (results) => onFileDrop(results.data, results.meta.fields),
       error: (error) => {
         console.error('Error parsing CSV:', error);
-        alert('Error parsing CSV file.');
       },
     });
   };
@@ -54,4 +53,4 @@ const FileUploader = ({ onFileDrop, hasFile }) => {
   );
 };
 
-export default FileUploader;
+export default React.memo(FileUploader);

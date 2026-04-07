@@ -5,16 +5,19 @@ import './styles/main.css';
 import App from './App';
 import { GraphDataProvider } from './context/GraphDataContext';
 import { GraphBuilderProvider } from './context/GraphBuilderContext';
+import { NotificationProvider } from './context/NotificationContext';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
     <BrowserRouter>
-      <GraphDataProvider>
-        <GraphBuilderProvider>
-          <App />
-        </GraphBuilderProvider>
-      </GraphDataProvider>
+      <NotificationProvider>
+        <GraphDataProvider>
+          <GraphBuilderProvider>
+            <App />
+          </GraphBuilderProvider>
+        </GraphDataProvider>
+      </NotificationProvider>
     </BrowserRouter>
   </React.StrictMode>
 );

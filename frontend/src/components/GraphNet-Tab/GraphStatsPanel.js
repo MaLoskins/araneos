@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Chart as ChartJS, BarElement, CategoryScale, LinearScale, Title, Tooltip, Legend } from 'chart.js';
 import { Bar } from 'react-chartjs-2';
 import { useGraphData } from '../../context/GraphDataContext';
@@ -6,11 +6,20 @@ import { fetchGraphStats } from '../../api';
 
 ChartJS.register(BarElement, CategoryScale, LinearScale, Title, Tooltip, Legend);
 
+const chartOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: { legend: { display: false } },
+  scales: {
+    x: { title: { display: true, text: 'Degree', color: '#8b949e' }, ticks: { color: '#8b949e' }, grid: { color: '#21262d' } },
+    y: { title: { display: true, text: 'Count', color: '#8b949e' }, ticks: { color: '#8b949e' }, grid: { color: '#21262d' } },
+  },
+};
+
 function GraphStatsPanel() {
   const graphData = useGraphData();
   const [serverStats, setServerStats] = useState(null);
 
-  // Fetch detailed stats from backend when session changes
   useEffect(() => {
     if (!graphData.sessionId) { setServerStats(null); return; }
     let cancelled = false;
@@ -21,9 +30,23 @@ function GraphStatsPanel() {
   }, [graphData.sessionId]);
 
   const stats = serverStats || graphData.stats;
-  if (!stats) return <div className="stats-panel-empty"><p>Process a graph to see statistics.</p></div>;
 
-  const degDist = serverStats?.degree_distribution;
+  const chartData = useMemo(() => {
+    const degDist = serverStats?.degree_distribution;
+    if (!degDist || Object.keys(degDist).length === 0) return null;
+    return {
+      labels: Object.keys(degDist),
+      datasets: [{
+        label: 'Nodes',
+        data: Object.values(degDist),
+        backgroundColor: 'rgba(88, 166, 255, 0.6)',
+        borderColor: 'rgba(88, 166, 255, 1)',
+        borderWidth: 1,
+      }],
+    };
+  }, [serverStats?.degree_distribution]);
+
+  if (!stats) return <div className="stats-panel-empty"><p>Process a graph to see statistics.</p></div>;
 
   return (
     <div className="stats-panel">
@@ -54,31 +77,11 @@ function GraphStatsPanel() {
         </div>
       </div>
 
-      {degDist && Object.keys(degDist).length > 0 && (
+      {chartData && (
         <div className="stats-chart">
           <h4>Degree Distribution</h4>
           <div className="stats-chart-container">
-            <Bar
-              data={{
-                labels: Object.keys(degDist),
-                datasets: [{
-                  label: 'Nodes',
-                  data: Object.values(degDist),
-                  backgroundColor: 'rgba(88, 166, 255, 0.6)',
-                  borderColor: 'rgba(88, 166, 255, 1)',
-                  borderWidth: 1,
-                }],
-              }}
-              options={{
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
-                scales: {
-                  x: { title: { display: true, text: 'Degree', color: '#8b949e' }, ticks: { color: '#8b949e' }, grid: { color: '#21262d' } },
-                  y: { title: { display: true, text: 'Count', color: '#8b949e' }, ticks: { color: '#8b949e' }, grid: { color: '#21262d' } },
-                },
-              }}
-            />
+            <Bar data={chartData} options={chartOptions} />
           </div>
         </div>
       )}
@@ -86,4 +89,4 @@ function GraphStatsPanel() {
   );
 }
 
-export default GraphStatsPanel;
+export default React.memo(GraphStatsPanel);

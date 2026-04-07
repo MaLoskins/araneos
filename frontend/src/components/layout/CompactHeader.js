@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { NavLink } from 'react-router-dom';
 import { FiShare2, FiCpu, FiDownload } from 'react-icons/fi';
 import { useGraphData } from '../../context/GraphDataContext';
@@ -9,14 +9,14 @@ function CompactHeader() {
   const nodeCount = graphData.stats?.node_count || 0;
   const edgeCount = graphData.stats?.edge_count || 0;
 
-  const handleDownloadJSON = () => {
+  const handleDownloadJSON = useCallback(() => {
     if (!nodeCount) return;
     const blob = new Blob([JSON.stringify({ nodes: graphData.nodes, edges: graphData.edges }, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = 'graph_data.json'; a.click();
     URL.revokeObjectURL(url);
-  };
+  }, [nodeCount, graphData.nodes, graphData.edges]);
 
   return (
     <header className="compact-header">
@@ -53,4 +53,4 @@ function CompactHeader() {
   );
 }
 
-export default CompactHeader;
+export default React.memo(CompactHeader);

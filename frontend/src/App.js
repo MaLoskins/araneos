@@ -1,18 +1,30 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import CompactHeader from './components/layout/CompactHeader';
-import GraphNet from './components/GraphNet-Tab/GraphNet';
-import TrainingTab from './components/Training-Tab/TrainingTab';
+import ErrorBoundary from './components/ErrorBoundary';
+
+const GraphNet = lazy(() => import('./components/GraphNet-Tab/GraphNet'));
+const TrainingTab = lazy(() => import('./components/Training-Tab/TrainingTab'));
+
+const Loading = () => (
+  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)' }}>
+    Loading...
+  </div>
+);
 
 function App() {
   return (
     <div className="app-container">
       <CompactHeader />
       <div className="workspace">
-        <Routes>
-          <Route path="/" element={<GraphNet />} />
-          <Route path="/train" element={<TrainingTab />} />
-        </Routes>
+        <ErrorBoundary>
+          <Suspense fallback={<Loading />}>
+            <Routes>
+              <Route path="/" element={<GraphNet />} />
+              <Route path="/train" element={<TrainingTab />} />
+            </Routes>
+          </Suspense>
+        </ErrorBoundary>
       </div>
     </div>
   );

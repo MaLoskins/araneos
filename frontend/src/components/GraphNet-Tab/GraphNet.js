@@ -13,6 +13,10 @@ import { useGraphData } from '../../context/GraphDataContext';
 
 const STEPS = ['Upload', 'Nodes', 'Relationships', 'Features', 'Process'];
 
+const MemoizedReactFlowWrapper = React.memo(ReactFlowWrapper);
+const MemoizedGraphStatsPanel = React.memo(GraphStatsPanel);
+const MemoizedFileUploader = React.memo(FileUploader);
+
 function GraphNet() {
   const graph = useGraph();
   const graphData = useGraphData();
@@ -22,7 +26,7 @@ function GraphNet() {
   const handleSubmitWithView = useCallback(async (labelCol) => {
     const result = await graph.handleSubmit(labelCol);
     if (result) setRightTab(1);
-  }, [graph]);
+  }, [graph.handleSubmit]);
 
   const currentStep = useMemo(() => {
     if (graph.columns.length === 0) return 0;
@@ -31,9 +35,12 @@ function GraphNet() {
     if (graph.loading) return 4;
     if (hasGraphData) return 5;
     return 3;
-  }, [graph.columns, graph.config.nodes, graph.edges, graph.loading, hasGraphData]);
+  }, [graph.columns.length, graph.config.nodes.length, graph.edges.length, graph.loading, hasGraphData]);
 
-  const selectedNodes = graph.config?.nodes?.map(n => n.id) || [];
+  const selectedNodes = useMemo(
+    () => graph.config?.nodes?.map(n => n.id) || [],
+    [graph.config?.nodes]
+  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -44,7 +51,7 @@ function GraphNet() {
           <div className="panel">
             <div className="panel-header"><h3>Configuration</h3></div>
             <div className="panel-body">
-              <FileUploader onFileDrop={graph.handleFileDrop} hasFile={graph.columns.length > 0} />
+              <MemoizedFileUploader onFileDrop={graph.handleFileDrop} hasFile={graph.columns.length > 0} />
               {graph.columns.length > 0 && (
                 <ConfigurationPanel
                   columns={graph.columns}
@@ -56,6 +63,8 @@ function GraphNet() {
                   onToggleFeatureSpace={graph.toggleFeatureSpace}
                   featureConfigs={graph.featureConfigs}
                   setFeatureConfigs={graph.setFeatureConfigs}
+                  labelColumn={graph.labelColumn}
+                  setLabelColumn={graph.setLabelColumn}
                 />
               )}
             </div>
@@ -63,7 +72,7 @@ function GraphNet() {
               <div className="panel-footer">
                 <button
                   className="btn btn-primary btn-block"
-                  onClick={() => handleSubmitWithView(localStorage.getItem('selectedLabelColumn') || '')}
+                  onClick={() => handleSubmitWithView(graph.labelColumn || '')}
                   disabled={graph.loading || selectedNodes.length === 0}
                 >
                   {graph.loading ? 'Processing...' : 'Process Graph'}
@@ -84,9 +93,8 @@ function GraphNet() {
               ))}
             </div>
 
-            {/* Keep all tabs mounted, hide with display:none to avoid remounting */}
             <div style={{ flex: 1, overflow: 'hidden', display: rightTab === 0 ? 'flex' : 'none', flexDirection: 'column' }}>
-              <ReactFlowWrapper
+              <MemoizedReactFlowWrapper
                 nodes={graph.nodes}
                 edges={graph.edges}
                 setNodes={graph.setNodes}
@@ -102,7 +110,7 @@ function GraphNet() {
               }
             </div>
             <div style={{ flex: 1, overflow: 'hidden', display: rightTab === 2 ? 'flex' : 'none', flexDirection: 'column' }}>
-              <GraphStatsPanel />
+              <MemoizedGraphStatsPanel />
             </div>
           </div>
         </Panel>

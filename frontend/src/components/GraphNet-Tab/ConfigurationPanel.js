@@ -17,11 +17,9 @@ const DEFAULT_FEATURE = {
 const ConfigurationPanel = ({
   columns, onSelectNode, onSubmit, loading, selectedNodes,
   useFeatureSpace, onToggleFeatureSpace, featureConfigs, setFeatureConfigs,
+  labelColumn, setLabelColumn,
 }) => {
   const [expandedIndices, setExpandedIndices] = useState([]);
-  const [labelColumn, setLabelColumn] = useState(() => localStorage.getItem('selectedLabelColumn') || '');
-
-  React.useEffect(() => { localStorage.setItem('selectedLabelColumn', labelColumn); }, [labelColumn]);
 
   const toggleExpand = (i) => setExpandedIndices(prev => { const u = [...prev]; u[i] = !prev[i]; return u; });
   const addFeature = () => { setFeatureConfigs(prev => [...prev, { ...DEFAULT_FEATURE }]); setExpandedIndices(prev => [...prev, true]); };

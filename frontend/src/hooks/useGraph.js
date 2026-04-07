@@ -76,7 +76,6 @@ const useGraph = () => {
   }, [currentNode, builder]);
 
   const handleSubmit = useCallback(async (labelColumn) => {
-    if (labelColumn) localStorage.setItem('selectedLabelColumn', labelColumn);
     builder.setLoading(true);
     builder.setGraphError(null);
     try {
@@ -122,7 +121,7 @@ const useGraph = () => {
 
   const isValidForTraining = graphData.sessionId && graphStats.nodeCount > 0 && graphStats.edgeCount > 0 && graphStats.hasLabels;
 
-  return {
+  return useMemo(() => ({
     csvData: builder.csvData,
     columns: builder.columns,
     config: builder.config,
@@ -141,8 +140,20 @@ const useGraph = () => {
     toggleFeatureSpace: builder.toggleFeatureSpace,
     featureConfigs: builder.featureConfigs,
     setFeatureConfigs: builder.setFeatureConfigs,
+    labelColumn: builder.labelColumn,
+    setLabelColumn: builder.setLabelColumn,
     graphStats, isValidForTraining,
-  };
+  }), [
+    builder.csvData, builder.columns, builder.config, builder.loading,
+    builder.graphError, builder.flowNodes, builder.flowEdges, builder.setFlowNodes,
+    builder.setFlowEdges, builder.useFeatureSpace, builder.toggleFeatureSpace,
+    builder.featureConfigs, builder.setFeatureConfigs, builder.labelColumn,
+    builder.setLabelColumn,
+    nodeEditModalIsOpen, currentNode, relationshipModalIsOpen, currentEdge,
+    handleFileDrop, handleSelectNode, handleSubmit,
+    onConnectHandler, onNodeClickHandler, onSaveRelationship,
+    handleSaveNodeEdit, graphStats, isValidForTraining,
+  ]);
 };
 
 export default useGraph;

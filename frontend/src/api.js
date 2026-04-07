@@ -2,15 +2,27 @@ import axios from 'axios';
 
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000';
 
-export const processData = async (data, config) => {
-  const response = await axios.post(`${API_BASE_URL}/process-data`, { data, config });
-  return response.data;
-};
+async function withRetry(fn, retries = 2, delay = 1000) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      const status = error?.response?.status;
+      const isRetryable = !status || status >= 500;
+      if (attempt < retries && isRetryable) {
+        await new Promise(r => setTimeout(r, delay * (attempt + 1)));
+        continue;
+      }
+      throw error;
+    }
+  }
+}
 
-export const fetchGraphStats = async (sessionId) => {
-  const response = await axios.get(`${API_BASE_URL}/graph/${sessionId}/stats`);
-  return response.data;
-};
+export const processData = (data, config) =>
+  withRetry(() => axios.post(`${API_BASE_URL}/process-data`, { data, config }).then(r => r.data));
+
+export const fetchGraphStats = (sessionId) =>
+  withRetry(() => axios.get(`${API_BASE_URL}/graph/${sessionId}/stats`).then(r => r.data));
 
 export const trainModel = (sessionId, modelConfig, onMessage, onError) => {
   if (!sessionId) {

@@ -50,10 +50,7 @@ export function GraphDataProvider({ children }) {
   const appendTrainingLog = useCallback((logEntry) => dispatch({ type: 'APPEND_TRAINING_LOG', payload: logEntry }), []);
   const clearTrainingLogs = useCallback(() => dispatch({ type: 'CLEAR_TRAINING_LOGS' }), []);
 
-  const dataValue = useMemo(() => ({
-    ...state,
-    ready: true,
-  }), [state]);
+  const dataValue = state;
 
   const actionsValue = useMemo(() => ({
     setGraph, setStats, resetGraph, appendTrainingLog, clearTrainingLogs,
