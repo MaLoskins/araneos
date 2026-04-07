@@ -16,3 +16,4 @@ tests
 chats.db
 .env
 __pycache__/
+build/
